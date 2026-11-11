@@ -7,6 +7,7 @@ window.__ModuleLoader__.load({
     const TAB_ID = 'dsh-skill-dashboard'
     const TAB_KIND = 'skill-dashboard'
     const ROUTE = '/api/skill-dash/data'
+    const FALLBACK_SITUATIONS = [{ id: 'other', title: '其他', order: 999 }]
 
     // ------------------------------------------------------------------ i18n
     const ZH = typeof navigator !== 'undefined' && /^zh/i.test(navigator.language || '')
@@ -24,6 +25,8 @@ window.__ModuleLoader__.load({
           refresh: '刷新',
           copy: '复制',
           copied: '已复制',
+          insert: '写进输入框',
+          inserted: '已写入',
           howto: '怎么说',
           badgeManual: '需点名',
           badgeAuto: '模型可调',
@@ -34,11 +37,15 @@ window.__ModuleLoader__.load({
           error: '读取失败',
           retry: '重试',
           manualBannerTitle: '这些技能默认不上架',
-          manualBannerBody: '只有你开口点名才会用到。点「需点名」只看它们，下面的触发语可以直接照抄。',
+          manualBannerBody: '只有你开口点名才会用到。点「需点名」只看它们，右边的触发语一键写进输入框。',
           subtitle: (total, manual) => `${total} 个技能 · ${manual} 个只能点名`,
           stale: '刷新失败，显示的是上次结果',
-          noFile: '无文件',
-          guideDesc: '全部技能，手动型带一句可复制的触发语',
+          unmapped: '没收录进 taxonomy，先归到「其他」——欢迎去仓库提 PR 把它归位。',
+          origin: '来源',
+          registryOrigin: '运行时注册，没有文件',
+          copyOrigin: '复制来源',
+          insertFailed: '写不进输入框，已复制',
+          noSession: '拿不到当前会话',
         }
       : {
           tab: 'Skills',
@@ -53,6 +60,8 @@ window.__ModuleLoader__.load({
           refresh: 'Refresh',
           copy: 'Copy',
           copied: 'Copied',
+          insert: 'Insert',
+          inserted: 'Inserted',
           howto: 'Say',
           badgeManual: 'Name it',
           badgeAuto: 'Model',
@@ -63,79 +72,18 @@ window.__ModuleLoader__.load({
           error: 'Failed to load',
           retry: 'Retry',
           manualBannerTitle: 'These stay out of the model catalog',
-          manualBannerBody: 'They only run when you name them. Pick “Name-only” to see just these, and copy a trigger below.',
+          manualBannerBody: 'They only run when you name them. Pick “Name-only”, then insert a trigger into the composer.',
           subtitle: (total, manual) => `${total} skills · ${manual} name-only`,
           stale: 'Refresh failed, showing the last result',
-          noFile: 'no file',
-          guideDesc: 'Every skill, with a copy-ready trigger for the name-only ones',
+          unmapped: 'Not in taxonomy yet, shown under Other — a PR is welcome.',
+          origin: 'Origin',
+          registryOrigin: 'Registered at runtime, no file',
+          copyOrigin: 'Copy origin',
+          insertFailed: 'Could not write the composer; copied instead',
+          noSession: 'No current session',
         }
 
-    // --------------------------------------------------------------- triggers
-    const CURATED = ZH
-      ? {
-          'setup-matt-pocock-skills': '跑 /setup-matt-pocock-skills，把这个仓库的 issue tracker、triage 标签和 domain docs 配好',
-          'skill-curator': '用 skill-curator 归档一下技能清单',
-          'session-audit': '审计这段对话，看看哪些插件真在工作',
-          'ask-matt': '问问 ask-matt，这个处境该用哪个技能',
-          grilling: 'grill 我这个方案：往死里挑毛病',
-          'grill-me': '来审我：把这个问题问到透',
-          prototype: '用 prototype 先做一版能跑的原型，回答这个设计问题',
-          tdd: '用 tdd：先写失败的测试，再让它变绿',
-          'code-review': 'review 一下我这条分支，标准和规格两个方向都看',
-          'writing-for-agents': '用 writing-for-agents 写一份给 agent 看的说明',
-          pr: '用 pr 把这次的改动写成 PR 描述',
-          wizard: '用 wizard 生成一个引导脚本，带我走完这些只有我能做的步骤',
-          research: '用 research 把这个主题查清楚，写成仓库里的一份文档',
-          handoff: '用 handoff 把这次对话整理成交接文档',
-          'to-tickets': '用 to-tickets 把这些工单拆出来写进 .scratch',
-          'to-spec': '用 to-spec 把这套需求写成一份规格',
-          triage: 'triage 一下新来的 issue',
-          wayfinder: '用 wayfinder 把这块不确定的地方铺成一张地图',
-          teach: '用 teach 带我从零学这个主题',
-          implement: '用 implement 把这张工单实现掉',
-          'implement-spec': '用 implement-spec 按这份规格一条条实现',
-          retro: '用 retro 做一次复盘',
-          'wait-what': 'wait-what：等等，你刚才那段我没听懂，重讲一遍',
-          'improve-codebase-architecture': '用 improve-codebase-architecture 找一下这块的加深机会',
-          'to-questionnaire': '用 to-questionnaire 把这些需求做成一问卷',
-        }
-      : {
-          'setup-matt-pocock-skills': 'Run /setup-matt-pocock-skills to configure the issue tracker, triage labels and domain docs',
-          'skill-curator': 'Use skill-curator to reconcile the skill inventory',
-          'session-audit': 'Audit this session: which plugins actually did work?',
-          'ask-matt': 'Ask ask-matt which skill fits right now',
-          grilling: 'Grill me on this plan',
-          prototype: 'Use prototype to build a throwaway that answers this design question',
-          tdd: 'Use tdd: failing test first, then make it green',
-          'code-review': 'Review this branch on both standards and spec',
-          pr: 'Use pr to write the PR body',
-          handoff: 'Use handoff to write the handoff document for this session',
-          'to-tickets': 'Use to-tickets to expand these into .scratch tickets',
-          'to-spec': 'Use to-spec to turn this into a spec',
-          triage: 'Triage the incoming issues',
-          wayfinder: 'Use wayfinder to map this uncertain area',
-          teach: 'Use teach to walk me through this topic from scratch',
-          implement: 'Use implement to build this ticket',
-          'implement-spec': 'Use implement-spec to work through this spec',
-          retro: 'Run a retro',
-          'wait-what': 'wait-what: re-explain that, I did not follow',
-        }
-
-    const GROUPS = [
-      { id: 'craft', title: ZH ? '工程流程' : 'Engineering', match: /^(tdd|code-review|pr$|prototype|diagnosing-bugs|domain-modeling|codebase-design|grill|implement|retro$|refactor|improve-|wayfinder|to-spec|to-tickets|to-questionnaire)/ },
-      { id: 'docs', title: ZH ? '文档与写作' : 'Docs & writing', match: /(writing|office|docx|pptx|xlsx|recalc|render|pdf|doc|handoff)/ },
-      { id: 'meta', title: ZH ? '技能与审计' : 'Skills & audit', match: /(skill|setup|ask-matt|session-audit|teach|wait-what)/ },
-      { id: 'research', title: ZH ? '查证与研究' : 'Research', match: /(research|diagnos)/ },
-      { id: 'visual', title: ZH ? '视觉与多媒体' : 'Visual', match: /(drawai|diagram|blender|motion|video|image|chart)/ },
-      { id: 'runtime', title: ZH ? '插件与运行时' : 'Plugins & runtime', match: /(plugin|cordis|harness|agent-|experience)/ },
-      { id: 'other', title: ZH ? '其他' : 'Other', match: /$^/ },
-    ]
-
-    function groupOf(name) {
-      for (const group of GROUPS) if (group.match.test(name)) return group
-      return GROUPS[GROUPS.length - 1]
-    }
-
+    // --------------------------------------------------------------- helpers
     function firstSentence(text) {
       const clean = String(text || '').replace(/\s+/g, ' ').trim()
       const cut = clean.split(/[.。!！?？]\s/)[0]
@@ -143,19 +91,33 @@ window.__ModuleLoader__.load({
     }
 
     function triggerFor(skill) {
-      if (CURATED[skill.name]) return CURATED[skill.name]
+      if (skill.trigger) return skill.trigger
       const desc = firstSentence(skill.whenToUse || skill.description)
       return ZH ? `用 ${skill.name} 技能：${desc || '按你说的来'}` : `Use the ${skill.name} skill: ${desc || 'as described'}`
     }
 
-    function sourceLabel(source) {
-      if (source === 'user-dsh' || source === 'user-agents') return ZH ? '用户' : 'user'
-      if (source === 'project-dsh' || source === 'project-agents') return ZH ? '项目' : 'project'
-      if (source === 'runtime') return ZH ? '注册表' : 'runtime'
-      if (source === 'bundled') return ZH ? '随包' : 'bundled'
-      if (source === 'file') return ZH ? '文件' : 'file'
-      if (source === 'registry') return ZH ? '注册表' : 'registry'
-      return source || 'other'
+    function originFor(skill) {
+      if (skill.repo) return skill.repo
+      if (skill.path) return skill.path
+      return ''
+    }
+
+    function appendText(draft, text) {
+      if (!draft) return text
+      if (/\s$/.test(draft)) return draft + text
+      return draft + ' ' + text
+    }
+
+    async function copyText(text) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text)
+          return true
+        }
+      } catch (error) {
+        /* fall through */
+      }
+      return false
     }
 
     // ----------------------------------------------------------------- style
@@ -248,6 +210,7 @@ window.__ModuleLoader__.load({
   border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px; padding: 0 5px; line-height: 1.6;
 }
 .sd-group-rule { flex: 1; height: 1px; background: var(--dsw-alias-border-l1); }
+.sd-group-note { color: var(--dsw-alias-label-secondary); font-size: 10.5px; line-height: 1.5; margin: -2px 0 7px; }
 .sd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 8px; align-items: start; }
 .sd-card {
   border: 1px solid var(--dsw-alias-border-l2);
@@ -286,21 +249,40 @@ window.__ModuleLoader__.load({
   overflow-wrap: anywhere;
 }
 .sd-trigger {
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 5px;
   border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 24%, var(--dsw-alias-border-l1));
   background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 7%, transparent);
-  border-radius: 8px; padding: 6px 8px 5px;
+  border-radius: 8px; padding: 6px 8px 6px;
 }
 .sd-trigger-label { color: var(--dsw-alias-state-warn-primary); font-size: 9px; font-weight: 650; letter-spacing: .08em; opacity: .9; }
-.sd-trigger-row { display: flex; align-items: flex-start; gap: 6px; }
-.sd-trigger-text { flex: 1; min-width: 0; font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
-.sd-copy {
-  flex: none; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 40%, transparent);
+.sd-trigger-text { font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
+.sd-actions { display: flex; gap: 5px; justify-content: flex-end; }
+.sd-btn-mini {
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 40%, transparent);
   background: transparent; color: var(--dsw-alias-state-warn-primary);
-  border-radius: 6px; padding: 0 7px; font: inherit; font-size: 10px; line-height: 1.8; cursor: pointer;
+  border-radius: 6px; padding: 0 8px; font: inherit; font-size: 10px; line-height: 1.9; cursor: pointer;
 }
-.sd-copy:hover { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent); }
-.sd-copy.is-done { border-color: var(--dsw-alias-state-success-primary); color: var(--dsw-alias-state-success-primary); }
+.sd-btn-mini:hover { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent); }
+.sd-btn-mini.is-primary { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent); font-weight: 600; }
+.sd-btn-mini.is-done { border-color: var(--dsw-alias-state-success-primary); color: var(--dsw-alias-state-success-primary); }
+.sd-trigger-note { color: var(--dsw-alias-label-secondary); font-size: 9.5px; line-height: 1.5; }
+.sd-origin {
+  display: flex; align-items: center; gap: 6px;
+  border-top: 1px dashed var(--dsw-alias-border-l1);
+  padding-top: 4px; margin-top: 1px;
+}
+.sd-origin-label { color: var(--dsw-alias-label-secondary); font-size: 9.5px; flex: none; }
+.sd-origin-value {
+  flex: 1; min-width: 0; color: var(--dsw-alias-label-secondary);
+  font-size: 9.5px; line-height: 1.6;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+.sd-origin-copy {
+  flex: none; border: 0; background: transparent; color: var(--dsw-alias-label-secondary);
+  font: inherit; font-size: 9.5px; cursor: pointer; padding: 0 2px; line-height: 1.6;
+}
+.sd-origin-copy:hover { color: var(--dsw-alias-label-primary); }
 .sd-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 8px; text-align: center; }
 .sd-empty-title { color: var(--dsw-alias-label-primary); font-size: 12px; font-weight: 550; }
 .sd-empty-hint { color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1.5; }
@@ -352,10 +334,10 @@ window.__ModuleLoader__.load({
     // -------------------------------------------------------------- dashboard
     function Dashboard(props) {
       const sessionId = props && props.sessionId ? String(props.sessionId) : ''
-      const [data, setData] = React.useState({ status: 'loading', skills: [], counts: null, error: '', stale: false })
+      const [data, setData] = React.useState({ status: 'loading', skills: [], situations: FALLBACK_SITUATIONS, counts: null, error: '', stale: false })
       const [query, setQuery] = React.useState('')
       const [mode, setMode] = React.useState('all')
-      const [copied, setCopied] = React.useState('')
+      const [feedback, setFeedback] = React.useState({ name: '', kind: '' })
       const [tick, setTick] = React.useState(0)
 
       React.useEffect(() => {
@@ -377,7 +359,14 @@ window.__ModuleLoader__.load({
                 }))
                 return
               }
-              setData({ status: 'ready', skills: payload.skills || [], counts: payload.counts || null, error: '', stale: false })
+              setData({
+                status: 'ready',
+                skills: payload.skills || [],
+                situations: payload.situations && payload.situations.length > 0 ? payload.situations : FALLBACK_SITUATIONS,
+                counts: payload.counts || null,
+                error: '',
+                stale: false,
+              })
             })
             .catch((error) => {
               if (!alive || (error && error.name === 'AbortError')) return
@@ -407,10 +396,38 @@ window.__ModuleLoader__.load({
         registry: skills.filter((skill) => !skill.path).length,
       }
 
+      const flash = (name, kind) => {
+        setFeedback({ name, kind })
+        setTimeout(() => setFeedback((current) => (current.name === name && current.kind === kind ? { name: '', kind: '' } : current)), 1600)
+      }
+
+      const insert = async (skill) => {
+        const text = triggerFor(skill)
+        const ok = appendToDraft(sessionId, text)
+        if (ok) {
+          flash(skill.name, 'inserted')
+          return
+        }
+        await copyText(text)
+        flash(skill.name, 'copied-fallback')
+      }
+
+      const copy = async (skill) => {
+        await copyText(triggerFor(skill))
+        flash(skill.name, 'copied')
+      }
+
+      const copyOrigin = async (skill) => {
+        const origin = originFor(skill)
+        if (!origin) return
+        await copyText(origin)
+        flash(skill.name + '#origin', 'copied')
+      }
+
       const needle = query.trim().toLowerCase()
       const visible = skills.filter((skill) => {
         if (needle) {
-          const haystack = `${skill.name} ${skill.description} ${skill.whenToUse}`.toLowerCase()
+          const haystack = `${skill.name} ${skill.description} ${skill.whenToUse} ${skill.situation}`.toLowerCase()
           if (!haystack.includes(needle)) return false
         }
         if (mode === 'manual') return skill.modelInvocable === false
@@ -421,28 +438,13 @@ window.__ModuleLoader__.load({
 
       const buckets = new Map()
       for (const skill of visible) {
-        const group = groupOf(skill.name)
-        if (!buckets.has(group.id)) buckets.set(group.id, { title: group.title, items: [] })
-        buckets.get(group.id).items.push(skill)
+        const key = skill.situation || 'other'
+        if (!buckets.has(key)) buckets.set(key, [])
+        buckets.get(key).push(skill)
       }
-      const ordered = GROUPS.filter((group) => buckets.has(group.id)).map((group) => buckets.get(group.id))
-
-      const copy = (skill) => {
-        const text = triggerFor(skill)
-        const done = () => {
-          setCopied(skill.name)
-          setTimeout(() => setCopied((current) => (current === skill.name ? '' : current)), 1600)
-        }
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(done).catch(done)
-          } else {
-            done()
-          }
-        } catch (error) {
-          done()
-        }
-      }
+      const ordered = data.situations
+        .filter((situation) => buckets.has(situation.id))
+        .map((situation) => ({ ...situation, items: buckets.get(situation.id) }))
 
       const chips = [
         { value: 'all', label: T.all, count: counts.total },
@@ -452,6 +454,51 @@ window.__ModuleLoader__.load({
       ]
 
       const showBanner = mode === 'all' && counts.manual > 0 && data.status === 'ready'
+
+      const renderCard = (skill) => {
+        const manual = skill.modelInvocable === false
+        const origin = originFor(skill)
+        const busy = feedback.name === skill.name
+        const originBusy = feedback.name === skill.name + '#origin'
+        return h('div', { className: 'sd-card' + (manual ? ' is-manual' : ''), key: skill.name },
+          h('div', { className: 'sd-card-top' },
+            h('code', { className: 'sd-name' }, skill.name),
+            h('div', { className: 'sd-badges' },
+              manual ? h('span', { className: 'sd-badge is-manual' }, T.badgeManual) : h('span', { className: 'sd-badge' }, T.badgeAuto),
+            ),
+          ),
+          skill.description ? h('p', { className: 'sd-desc' }, skill.description) : null,
+          manual
+            ? h('div', { className: 'sd-trigger' },
+                h('div', { className: 'sd-trigger-label' }, T.howto),
+                h('div', { className: 'sd-trigger-text' }, triggerFor(skill)),
+                h('div', { className: 'sd-actions' },
+                  h('button', {
+                    type: 'button',
+                    className: 'sd-btn-mini is-primary' + (busy && feedback.kind === 'inserted' ? ' is-done' : ''),
+                    onClick: () => insert(skill),
+                  }, busy && feedback.kind === 'inserted' ? T.inserted : T.insert),
+                  h('button', {
+                    type: 'button',
+                    className: 'sd-btn-mini' + (busy && (feedback.kind === 'copied' || feedback.kind === 'copied-fallback') ? ' is-done' : ''),
+                    onClick: () => copy(skill),
+                  }, busy && (feedback.kind === 'copied' || feedback.kind === 'copied-fallback') ? T.copied : T.copy),
+                ),
+                busy && feedback.kind === 'copied-fallback'
+                  ? h('div', { className: 'sd-trigger-note' }, T.insertFailed)
+                  : null,
+              )
+            : null,
+          h('div', { className: 'sd-origin' },
+            h('span', { className: 'sd-origin-label' }, T.origin),
+            h('span', { className: 'sd-origin-value', title: origin || T.registryOrigin }, origin || T.registryOrigin),
+            origin
+              ? h('button', { type: 'button', className: 'sd-origin-copy', title: T.copyOrigin, onClick: () => copyOrigin(skill) },
+                  originBusy ? T.copied : '⧉')
+              : null,
+          ),
+        )
+      }
 
       return h('div', { className: 'sd-root' },
         h('div', { className: 'sd-head' },
@@ -533,43 +580,15 @@ window.__ModuleLoader__.load({
                   h('div', { className: 'sd-empty-title' }, T.empty),
                   h('div', { className: 'sd-empty-hint' }, T.emptyHint),
                 )
-              : ordered.map((group) =>
-                  h('div', { className: 'sd-group', key: group.title },
+              : ordered.map((situation) =>
+                  h('div', { className: 'sd-group', key: situation.id },
                     h('div', { className: 'sd-group-head' },
-                      h('span', { className: 'sd-group-title' }, group.title),
-                      h('span', { className: 'sd-group-count' }, String(group.items.length)),
+                      h('span', { className: 'sd-group-title' }, situation.title),
+                      h('span', { className: 'sd-group-count' }, String(situation.items.length)),
                       h('span', { className: 'sd-group-rule' }),
                     ),
-                    h('div', { className: 'sd-grid' },
-                      group.items.map((skill) => {
-                        const manual = skill.modelInvocable === false
-                        return h('div', { className: 'sd-card' + (manual ? ' is-manual' : ''), key: skill.name },
-                          h('div', { className: 'sd-card-top' },
-                            h('code', { className: 'sd-name' }, skill.name),
-                            h('div', { className: 'sd-badges' },
-                              manual
-                                ? h('span', { className: 'sd-badge is-manual' }, T.badgeManual)
-                                : h('span', { className: 'sd-badge' }, T.badgeAuto),
-                              h('span', { className: 'sd-badge' }, skill.path ? sourceLabel(skill.source) : T.registry),
-                            ),
-                          ),
-                          skill.description ? h('p', { className: 'sd-desc' }, skill.description) : null,
-                          manual
-                            ? h('div', { className: 'sd-trigger' },
-                                h('div', { className: 'sd-trigger-label' }, T.howto),
-                                h('div', { className: 'sd-trigger-row' },
-                                  h('div', { className: 'sd-trigger-text' }, triggerFor(skill)),
-                                  h('button', {
-                                    type: 'button',
-                                    className: 'sd-copy' + (copied === skill.name ? ' is-done' : ''),
-                                    onClick: () => copy(skill),
-                                  }, copied === skill.name ? T.copied : T.copy),
-                                ),
-                              )
-                            : null,
-                        )
-                      }),
-                    ),
+                    situation.id === 'other' ? h('div', { className: 'sd-group-note' }, T.unmapped) : null,
+                    h('div', { className: 'sd-grid' }, situation.items.map(renderCard)),
                   ),
                 ),
       )
@@ -581,29 +600,59 @@ window.__ModuleLoader__.load({
 
     // --------------------------------------------------------- header button
     let rightbar = null
+    let hostCtx = null
+
+    function appendToDraft(sessionId, text) {
+      try {
+        if (!hostCtx || !sessionId) return false
+        const actx = hostCtx.sessions?.scope?.(sessionId)
+        if (!actx) return false
+        const conversation = hostCtx.get?.('conversation')
+        const input = conversation?.input?.for?.(actx)
+        if (!input) return false
+        const snapshot = input.state?.getSnapshot?.()
+        if (!snapshot) return false
+        // A draft carrying chips (references, slash commands) must not go
+        // through setDraft: it rebuilds the document from plain text and would
+        // flatten every chip. Refuse, and let the caller copy instead.
+        const hasChips = (snapshot.occurrences?.length ?? 0) > 0 || snapshot.phase === 'claimed'
+        if (hasChips) return false
+        const draft = typeof snapshot.draft === 'string' ? snapshot.draft : ''
+        input.setDraft(appendText(draft, text))
+        return true
+      } catch (error) {
+        console.warn('skill-dashboard: cannot write the composer draft', error)
+        return false
+      }
+    }
 
     function openDashboard() {
-      const attempt = () => {
+      if (!rightbar) return
+      const open = () => {
         try {
-          rightbar?.openTab?.(TAB_KIND)
-          return true
+          rightbar.openTab?.(TAB_KIND)
         } catch (error) {
-          return false
+          console.warn('skill-dashboard: cannot open the tab', error)
         }
       }
-      if (attempt()) return
-      // The panel's store is minted by its seat, so a collapsed panel has
-      // nothing to open a tab into: expand it, then retry once it mounted.
+      // A collapsed column has nothing to open a tab into, and `openTab` does
+      // not throw for it — it just does nothing. Expand first, then open.
+      let expanded = true
       try {
-        if (typeof rightbar?.isExpanded === 'function' && !rightbar.isExpanded()) {
-          rightbar.toggleExpanded()
-          setTimeout(attempt, 180)
-          return
-        }
+        if (typeof rightbar.isExpanded === 'function') expanded = rightbar.isExpanded()
       } catch (error) {
-        /* fall through to the plain retry */
+        expanded = true
       }
-      setTimeout(attempt, 220)
+      if (!expanded) {
+        try {
+          rightbar.toggleExpanded()
+        } catch (error) {
+          console.warn('skill-dashboard: cannot expand the right column', error)
+        }
+        setTimeout(open, 220)
+        return
+      }
+      open()
     }
 
     function OpenButton() {
@@ -625,7 +674,6 @@ window.__ModuleLoader__.load({
       } catch (error) {
         console.error('skill-dashboard: styles.insert unavailable', error)
       }
-      // Fallback: the dynamic module scope does not always carry `styles`.
       ctx.effect(() => {
         const element = document.createElement('style')
         element.setAttribute('data-plugin', 'dsh-skill-dashboard')
@@ -643,10 +691,11 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'sidebarRightTabs', 'sidebarRight'],
+      inject: ['slots', 'sidebarRightTabs', 'sidebarRight', 'sessions', 'conversation'],
       apply(ctx) {
         installStyles(ctx)
 
+        hostCtx = ctx
         rightbar = ctx.get('sidebarRight') ?? null
         const tabs = ctx.get('sidebarRightTabs')
 

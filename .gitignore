@@ -17,3 +17,6 @@ desktop.ini
 # editors
 .vscode/
 .idea/
+
+# local research notes (machine-specific paths)
+docs/research/

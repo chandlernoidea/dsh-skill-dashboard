@@ -9,14 +9,50 @@
  * runtime-registered (registry, no file) ones all appear together — the same
  * set the model sees, without activating a cold Agent.
  *
- * Without a session id it degrades to the global `skills` layer.
+ * `taxonomy.json` then labels each skill with the situation it belongs to and
+ * an optional trigger phrase. It is plain data so the community can fix a
+ * grouping by editing one file; a skill missing from it still shows up, under
+ * "other".
  */
+
+import { readFile, stat } from 'node:fs/promises'
 
 export const name = 'dsh-skill-dashboard'
 
 export const inject = ['webServer']
 
 const ROUTE_PATH = '/api/skill-dash/data'
+const TAXONOMY_URL = new URL('./taxonomy.json', import.meta.url)
+
+const FALLBACK_TAXONOMY = {
+  version: 0,
+  situations: [{ id: 'other', title: '其他', order: 999 }],
+  skills: {},
+}
+
+let taxonomyCache = { mtimeMs: -1, data: null }
+
+async function loadTaxonomy() {
+  try {
+    const info = await stat(TAXONOMY_URL)
+    if (taxonomyCache.data !== null && info.mtimeMs === taxonomyCache.mtimeMs) {
+      return taxonomyCache.data
+    }
+    const raw = await readFile(TAXONOMY_URL, 'utf8')
+    const data = JSON.parse(raw)
+    taxonomyCache = { mtimeMs: info.mtimeMs, data }
+    return data
+  } catch (error) {
+    ctxLoggerWarn('skill-dashboard: taxonomy unavailable, falling back', error)
+    return taxonomyCache.data ?? FALLBACK_TAXONOMY
+  }
+}
+
+function ctxLoggerWarn(message, error) {
+  // No plugin logger reaches this module before `apply`; the host console is
+  // the only place a broken taxonomy can surface.
+  console.warn(message, error)
+}
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -56,10 +92,23 @@ function fromSummary(summary) {
   }
 }
 
+function labelWithTaxonomy(items, taxonomy) {
+  const byName = taxonomy.skills ?? {}
+  return items.map((item) => {
+    const entry = byName[item.name] ?? null
+    return {
+      ...item,
+      situation: entry?.situation ?? 'other',
+      trigger: typeof entry?.trigger === 'string' ? entry.trigger : '',
+      repo: typeof entry?.repo === 'string' ? entry.repo : '',
+    }
+  })
+}
+
 export function apply(ctx) {
   const server = ctx.get('webServer')
   if (server === undefined) {
-    ctx.logger?.warn?.('skill-dashboard: webServer unavailable, no route registered')
+    console.warn('skill-dashboard: webServer unavailable, no route registered')
     return
   }
 
@@ -128,23 +177,30 @@ export function apply(ctx) {
     } catch (error) {
       return json({ ok: false, error: String(error?.message ?? error), skills: [] }, 500)
     }
-    const items = result.items
-    if (items === null) {
+    const skills = result.items
+    if (skills === null) {
       return json({ ok: false, error: result.error || 'catalog unavailable', via: result.via, skills: [] }, 503)
     }
-    items.sort((a, b) => a.name.localeCompare(b.name))
+
+    const taxonomy = await loadTaxonomy()
+    const labelled = labelWithTaxonomy(skills, taxonomy).sort((a, b) => a.name.localeCompare(b.name))
+    const situations = [...(taxonomy.situations ?? FALLBACK_TAXONOMY.situations)].sort((a, b) => a.order - b.order)
+
     return json({
       ok: true,
       via: result.via,
       note: result.note || '',
       generatedAt: Date.now(),
+      taxonomyVersion: taxonomy.version ?? 0,
+      situations,
       counts: {
-        total: items.length,
-        manual: items.filter((item) => !item.modelInvocable).length,
-        files: items.filter((item) => item.path).length,
-        registry: items.filter((item) => !item.path).length,
+        total: labelled.length,
+        manual: labelled.filter((item) => !item.modelInvocable).length,
+        files: labelled.filter((item) => item.path).length,
+        registry: labelled.filter((item) => !item.path).length,
+        unmapped: labelled.filter((item) => item.situation === 'other').length,
       },
-      skills: items,
+      skills: labelled,
     })
   }
 

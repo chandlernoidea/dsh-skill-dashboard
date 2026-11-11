@@ -1,87 +1,139 @@
 # dsh-skill-dashboard
 
-技能上手台：DSH Web UI 右侧栏里的一页技能清单。
+A [DeepSeek Harness](https://github.com/deepseek-ai) plugin: one page that shows every skill you have installed, which of them can only be called by name, and the sentence that calls each one.
+
+![screenshot](docs/screenshot.png)
+
+## What it solves
+
+Install enough skill packs and two things break:
+
+1. **You stop knowing what you have.** Skills land in `~/.dsh/skills`, in project `.dsh/skills`, inside packages, and in plugin registries that never touch disk.
+2. **The best ones are invisible.** A skill with `disable-model-invocation: true` stays out of the model's catalog on purpose — the model cannot even try to use it, and the tool call fails with `not available for model invocation`. Only a user who knows the exact name can call it.
+
+The dashboard is the missing index for both.
+
+## Features
+
+- **Every skill in one list**, grouped by *situation* — what you are trying to do (write code / review / write docs / research / design / learn / maintain the harness) — not by which repository it came from.
+- **Manual-only skills called out** with a badge and a trigger phrase you can insert into the composer in one click; the phrase is appended, never sent, and never overwrites a draft.
+- **Search and filters**: name or description, name-only, on-disk, registry-only.
+- **Origin** per card: the repository URL when the taxonomy knows it, the file path otherwise, one click to copy.
+- **Live catalog**: it reads the host's `sessionSkillCatalog`, so user, project, bundled and runtime-registered skills all appear, and a skill installed later shows up on the next refresh (30s).
+
+## Install
+
+Requires DSH with the right Sidebar (`@deepseek-ai/dsh-client-ui-sidebar-right`), which ships with the default web profile.
+
+```js
+// from a local checkout
+plugin_manager({ action: 'install_bundle', target: 'D:/path/to/dsh-skill-dashboard' })
+```
+
+```js
+// after the package is published
+plugin_manager({ action: 'install_bundle', target: 'dsh-skill-dashboard' })
+```
+
+Open it from the **Skills** button in the session header, or from the right sidebar's `+` → guide.
+
+## Taxonomy
+
+Grouping and trigger phrases live in [`taxonomy.json`](taxonomy.json) — plain data, no rebuild:
+
+```json
+{
+  "situations": [{ "id": "code", "title": "写代码", "order": 10 }],
+  "skills": {
+    "tdd": { "situation": "code" },
+    "handoff": { "situation": "docs", "trigger": "用 handoff 把这次对话整理成交接文档" }
+  }
+}
+```
+
+- A skill that is not listed still appears, under **其他 / Other**.
+- `trigger` is optional; when absent the sentence is generated from the skill's own description.
+- `repo` is optional; it turns the origin line into a copyable repository URL.
+- `node tools/check-taxonomy.mjs` validates the file (CI runs it too).
+
+## Non-goals
+
+This plugin is **read-only by design** — see [ADR 0001](docs/adr/0001-read-only-by-design.md). It does not install, uninstall, update, enable or disable skills; `@michengai/dsh-skills-manager` and `@linxin666/dsh-client-ui-skill-explorer` already own that, and a second installer would only drift.
+
+It also does not browse skills you have *not* installed.
+
+## Development
+
+```bash
+node --check index.js
+node --check client.js
+node tools/check-taxonomy.mjs
+```
+
+Host half: `index.js` serves `GET /api/skill-dash/data` (catalog + taxonomy merged). Client half: `client.js` registers the tab, its body, and the header button. After editing `index.js`, reload the bundle (`plugin_manager set_bundle` off, then on) — HMR does not re-import the Host module. After editing `client.js`, reload the page.
+
+## License
+
+MIT.
+
+---
+
+# 中文
+
+一个 DSH 插件：一页看全已装技能，标出哪些只能点名调用，并给出一句可以直接写进输入框的触发语。
 
 ## 它解决什么
 
-装了很多技能包之后，两件事最难：**不知道自己有哪些技能**，**不知道那些「手动型」技能该怎么叫**。
-`disable-model-invocation: true` 的技能不会出现在模型的技能目录里，模型调用会直接报
-`skill "xxx" is not available for model invocation` —— 只有你开口点名才会用。
-它们在界面上原本是隐形的，这页把它们捞出来，并给一句可以直接照抄的触发语。
+技能装多了会坏两件事：
 
-## 界面
+1. **不知道自己有哪些** —— 技能散在 `~/.dsh/skills`、项目 `.dsh/skills`、插件包、以及根本不落盘的注册表里。
+2. **最好的那批是隐形的** —— 声明了 `disable-model-invocation: true` 的技能故意不进模型的技能目录，模型连试都试不了，调用会直接报 `not available for model invocation`。只有知道确切名字的用户才叫得动。
 
-一页三段：
+上手台就是这两件事的索引。
 
-1. **头部**：小标 `SKILL DASHBOARD` + 标题 + `45 个技能 · 13 个只能点名`，下面是四个数字块（合计 / 需点名 / 有文件 / 注册表），「需点名」用警示色描边。
-2. **吸顶工具条**（`position: sticky`）：搜索框（带放大镜图标）、刷新按钮、四个筛选胶囊（每个带计数）。滚到后面时它停在顶部。
-3. **内容**：按领域分组（工程流程 / 文档 / 技能与审计 / 查证 / 视觉 / 插件运行时 / 其他），组标题带计数和分隔线；卡片双列自适应（`auto-fill minmax(232px,1fr)`，窄栏自动变单列）。
+## 功能
 
-手动型卡片：左侧 3px 警示色边 + `需点名` 徽章 + 单独一块「怎么说」触发语（警示色浅底），右侧「复制」按钮，复制后变绿并显示「已复制」1.6s。
+- **一张清单看全**，按**处境**分组（写代码 / 审代码 / 写文档 / 研究查证 / 设计出图 / 学习 / 维护 harness），而不是按仓库来源。
+- **手动型技能单列**：金色边 + 徽章 + 触发语，一键写进输入框（追加，不发送，不覆盖已有草稿）。
+- **搜索与筛选**：名字/说明、只看需点名、只看有文件、只看注册表。
+- **来源**：taxonomy 里有仓库地址就显示地址，否则显示文件路径，一键复制。
+- 数据来自宿主的 `sessionSkillCatalog`，用户/项目/随包/注册表型技能都在；新装的 30 秒内自动出现。
 
-状态：加载中是 6 个 shimmer 骨架块；空结果给换词提示；失败给错误信息和「重试」。
+## 安装
 
-> **滚动契约**：右侧栏 tab body 必须自己当滚动容器 —— `height: 100%; overflow-y: auto`。第一版写成 `min-height: 100%` 且没有 overflow，结果内容被父容器裁掉、完全没法上下翻。和 `dsh-context` 的 `.lc-root` 是同一套写法。
+需要带右侧栏的 DSH（默认 Web profile 自带 `@deepseek-ai/dsh-client-ui-sidebar-right`）。
 
-## 数据来源
+```js
+plugin_manager({ action: 'install_bundle', target: 'D:/path/to/dsh-skill-dashboard' })
+```
 
-Host 半注册 `GET /api/skill-dash/data?session=<sessionId>`。
+入口：会话标题栏的「技能」按钮，或右侧栏 `+` → 开始 里的「技能」。
 
-三级取数，按顺序尝试（响应里的 `via` 字段告诉你是哪一级）：
+## 归类表
 
-1. **`catalog`** — `sessionSkillCatalog.list({ sessionId })`：宿主专门给 UI 用的服务，返回**一个会话组合下**用户可调用的全部技能，用户技能 / 项目技能 / 随包技能 / 注册表技能合在一起，`modelInvocable` 直接标出手动型。
-2. **`scoped`** — `sessions.scope(sessionId)` + `skills.list({ scope })`：catalog 不可用时的等价取法。
-3. **`global`** — `skills.list({})`：只有全局层（本机约 11 条），属于降级结果。
+分组和触发语都在 [`taxonomy.json`](taxonomy.json)，改它不用重新构建：
 
-不扫文件、不硬编码技能名，所以注册表里那些没有磁盘文件的技能也在。
+- 没收录的技能照常显示，归到「其他」。
+- `trigger` 可省，省了就用技能自己的 description 自动生成。
+- `repo` 可省，填了来源行就变成可复制的仓库地址。
+- `node tools/check-taxonomy.mjs` 校验，CI 也会跑。
 
-> 注意：`skills.list({})` 不带 scope 时**看不到用户技能**（`~/.dsh/skills/*` 在会话组合层）——第一版踩过这个坑，只拿到 11 条。
+## 非目标
 
-## 入口
+**只读**（见 [ADR 0001](docs/adr/0001-read-only-by-design.md)）：不装、不卸、不更新、不启停。这些事 `@michengai/dsh-skills-manager` 和 `@linxin666/dsh-client-ui-skill-explorer` 已经在做，再做一遍只会各自漂移。
 
-- **会话标题栏右侧的「技能」按钮**：点了开 tab（面板关着时会先展开再重试一次）
-- **右侧栏「+」→ 开始页**：tab 类型注册了 `guide` 条目，列表里会出现一行「技能」，点它打开
-- tab 本身 `kind: skill-dashboard`
-
-## 已知边界
-
-- 只读：不安装、不启停、不编辑技能（那是 skill-explorer / skills-manager 的事）
-- 第一版没有跨会话的「用过哪些」统计（需要解码会话存档，留给下一版）
-- 触发语里 curated 的那几条写在 `client.js` 的 `CURATED` 里，其余按说明自动生成
+也不做「未安装技能」的浏览。
 
 ## 开发
 
 ```bash
 node --check index.js
 node --check client.js
+node tools/check-taxonomy.mjs
 ```
 
-### 样式注入
+改 `index.js` 后要重载 bundle（`plugin_manager set_bundle` 关再开）—— HMR 不会重新 import Host 模块；改 `client.js` 刷新页面即可。
 
-动态 Client 模块的工厂作用域里**不一定有 `styles` 这个 builtin**（实测本机没有，`ctx.get('styles')` 也是 undefined）。
-没有它，`styles.insert(CSS)` 根本没执行 —— 组件照常渲染，但一个样式都没有：卡片全是裸 `<div>`、SVG 按默认尺寸撑成几百像素、`overflow-y` 不存在所以完全不能滚动。
+## 许可证
 
-现在的写法：先试 `styles.insert`，拿不到就自己建一个 `<style data-plugin="dsh-skill-dashboard">` 塞进 `document.head`，用 `ctx.effect` 管清理。图标也补了 `width/height` 属性，样式万一再丢也不会炸成一个大图标。
-
-### 验证
-
-本机没有浏览器控制，`tools/` 下是配的一套窗口级验证工具（纯 PowerShell + .NET，没装任何东西）：
-
-| 脚本 | 作用 |
-|---|---|
-| `tools/shot.ps1` | 找到 DSH 窗口 → 置前 → 按窗口矩形截图（含 DPI 感知） |
-| `tools/crop.ps1` | 裁剪 + 放大某个区域，用来定位按钮坐标 |
-| `tools/click.ps1` | 按屏幕坐标左键点击 |
-| `tools/wheel.ps1` | 按坐标滚轮（测滚动） |
-| `tools/key.ps1` | 给窗口发快捷键（如 `^r` 刷新页面） |
-
-坐标换算：截图位图坐标 = 屏幕坐标 + (11,11)（窗口原点是 -11,-11）；预览图与物理像素比约 1.44。
-
-装进 profile：
-
-```js
-plugin_manager({ action: 'install_bundle', target: '<absolute path to this directory>' })
-```
-
-**改了 Host 半（`index.js`）必须重载插件**：HMR 不会重新 import Host 模块（观察到的现象是路由还是老逻辑）。
-`plugin_manager set_bundle` 关一次再开一次即可，不用重启 DSH。改了 Client 半（`client.js`）刷新页面即可。
+MIT。

@@ -1,0 +1,195 @@
+{
+  "version": 1,
+  "situations": [
+    {
+      "id": "code",
+      "title": "写代码",
+      "order": 10
+    },
+    {
+      "id": "review",
+      "title": "审代码",
+      "order": 20
+    },
+    {
+      "id": "docs",
+      "title": "写文档",
+      "order": 30
+    },
+    {
+      "id": "research",
+      "title": "研究查证",
+      "order": 40
+    },
+    {
+      "id": "design",
+      "title": "设计出图",
+      "order": 50
+    },
+    {
+      "id": "learn",
+      "title": "学习",
+      "order": 60
+    },
+    {
+      "id": "harness",
+      "title": "维护 harness",
+      "order": 70
+    },
+    {
+      "id": "other",
+      "title": "其他",
+      "order": 999
+    }
+  ],
+  "skills": {
+    "tdd": {
+      "situation": "code"
+    },
+    "diagnosing-bugs": {
+      "situation": "code"
+    },
+    "codebase-design": {
+      "situation": "code"
+    },
+    "domain-modeling": {
+      "situation": "code"
+    },
+    "implement": {
+      "situation": "code",
+      "trigger": "用 implement 把这张工单实现掉"
+    },
+    "implement-spec": {
+      "situation": "code",
+      "trigger": "用 implement-spec 按这份规格一条条实现"
+    },
+    "improve-codebase-architecture": {
+      "situation": "code",
+      "trigger": "用 improve-codebase-architecture 找一下这块的加深机会"
+    },
+    "prototype": {
+      "situation": "code"
+    },
+    "code-review": {
+      "situation": "review"
+    },
+    "pr": {
+      "situation": "review"
+    },
+    "triage": {
+      "situation": "review",
+      "trigger": "triage 一下新来的 issue"
+    },
+    "grilling": {
+      "situation": "review"
+    },
+    "grill-me": {
+      "situation": "review"
+    },
+    "grill-with-docs": {
+      "situation": "review"
+    },
+    "wayfinder": {
+      "situation": "review",
+      "trigger": "用 wayfinder 把这块不确定的地方铺成一张地图"
+    },
+    "handoff": {
+      "situation": "docs",
+      "trigger": "用 handoff 把这次对话整理成交接文档"
+    },
+    "to-spec": {
+      "situation": "docs",
+      "trigger": "用 to-spec 把这套需求写成一份规格"
+    },
+    "to-tickets": {
+      "situation": "docs",
+      "trigger": "用 to-tickets 把这些工单拆出来"
+    },
+    "to-questionnaire": {
+      "situation": "docs",
+      "trigger": "用 to-questionnaire 把这些需求做成一问卷"
+    },
+    "writing-for-agents": {
+      "situation": "docs"
+    },
+    "office": {
+      "situation": "docs"
+    },
+    "office-docx": {
+      "situation": "docs"
+    },
+    "office-export-pdf": {
+      "situation": "docs"
+    },
+    "office-pptx": {
+      "situation": "docs"
+    },
+    "office-recalculate": {
+      "situation": "docs"
+    },
+    "office-render": {
+      "situation": "docs"
+    },
+    "office-xlsx": {
+      "situation": "docs"
+    },
+    "research": {
+      "situation": "research"
+    },
+    "session-audit": {
+      "situation": "research"
+    },
+    "diagram-design": {
+      "situation": "design"
+    },
+    "drawai-canvas": {
+      "situation": "design"
+    },
+    "drawai-video": {
+      "situation": "design"
+    },
+    "blender-modeling": {
+      "situation": "design"
+    },
+    "teach": {
+      "situation": "learn",
+      "trigger": "用 teach 带我从零学这个主题"
+    },
+    "wait-what": {
+      "situation": "learn",
+      "trigger": "wait-what：等等，你刚才那段我没听懂，重讲一遍"
+    },
+    "setup-matt-pocock-skills": {
+      "situation": "harness",
+      "trigger": "跑 /setup-matt-pocock-skills，把这个仓库的 issue tracker、triage 标签和 domain docs 配好"
+    },
+    "skill-curator": {
+      "situation": "harness"
+    },
+    "ask-matt": {
+      "situation": "harness"
+    },
+    "diagnose-windows-sandbox-acl": {
+      "situation": "harness"
+    },
+    "retro": {
+      "situation": "harness",
+      "trigger": "用 retro 做一次复盘"
+    },
+    "wizard": {
+      "situation": "harness"
+    },
+    "agent-experience": {
+      "situation": "harness"
+    },
+    "cordis-composition-reference": {
+      "situation": "harness"
+    },
+    "cordis-plugin-development": {
+      "situation": "harness"
+    },
+    "editing-cordis-compositions": {
+      "situation": "harness"
+    }
+  }
+}

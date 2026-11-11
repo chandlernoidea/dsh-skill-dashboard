@@ -1,23 +1,47 @@
 {
   "name": "dsh-skill-dashboard",
   "version": "0.1.0",
-  "private": true,
+  "description": "Skill dashboard for DeepSeek Harness: browse every installed skill, spot the manual-only ones, and insert a trigger phrase into the composer.",
   "type": "module",
-  "description": "Skill dashboard: browse every installed skill, spot the manual-only ones, and copy their trigger phrase.",
+  "license": "MIT",
+  "author": "chandlernoidea",
   "icon": "icon.svg",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chandlernoidea/dsh-skill-dashboard.git"
+  },
+  "homepage": "https://github.com/chandlernoidea/dsh-skill-dashboard#readme",
+  "bugs": {
+    "url": "https://github.com/chandlernoidea/dsh-skill-dashboard/issues"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
+    "./taxonomy.json": "./taxonomy.json",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
   "files": [
     "index.js",
     "client.js",
+    "taxonomy.json",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "node --check index.js && node --check client.js && node tools/check-taxonomy.mjs"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "cordis",
+    "plugin",
+    "skills",
+    "dashboard",
+    "ui"
   ],
   "dsh": {
     "bundle": {
