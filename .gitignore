@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+pnpm-lock.yaml.bak
+
+# local scratch / debug artifacts
+.shots/
+.refs/
+.scratch/
+*.log
+tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# editors
+.vscode/
+.idea/
