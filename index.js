@@ -131,9 +131,12 @@ async function readPlugins(ctx) {
       active: rows.filter((row) => row.fiberPhase === 'active').length,
       failed: failed.length,
       disabled: rows.filter((row) => row.enabled === false).length,
-      failedNames: failed
-        .map((row) => ({ name: titleOf(row.meta) || row.moduleName || String(row.entryId), diagnostic: row.diagnostic || '' }))
-        .slice(0, 8),
+      failedNames: failed.slice(0, 20).map((row) => ({
+        name: titleOf(row.meta) || row.moduleName || String(row.entryId),
+        moduleName: row.moduleName || '',
+        phase: row.fiberPhase ?? null,
+        diagnostic: String(row.diagnostic ?? row.meta?.error ?? ''),
+      })),
     }
   } catch (error) {
     console.warn('skill-dashboard: plugin inventory unavailable', error)

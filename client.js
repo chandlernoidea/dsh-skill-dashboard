@@ -50,7 +50,11 @@ window.__ModuleLoader__.load({
           pluginActive: '活跃',
           pluginFailed: '失败',
           pluginDisabled: '停用',
-          failedList: '失败：',
+          failedList: '插件失败',
+          diagExpand: '展开诊断',
+          diagCollapse: '收起',
+          diagEmpty: '没有诊断文本',
+          diagMore: (n) => `另有 ${n} 个`,
           sessionLabel: '本会话',
           sessionUsage: (skills, calls) => `用过 ${skills} 个技能 · ${calls} 次调用`,
           sessionFailed: (n) => `（${n} 次失败）`,
@@ -100,7 +104,11 @@ window.__ModuleLoader__.load({
           pluginActive: 'active',
           pluginFailed: 'failed',
           pluginDisabled: 'disabled',
-          failedList: 'Failed:',
+          failedList: 'Failed plugins',
+          diagExpand: 'Show diagnostics',
+          diagCollapse: 'Hide',
+          diagEmpty: 'No diagnostic text',
+          diagMore: (n) => `${n} more`,
           sessionLabel: 'This session',
           sessionUsage: (skills, calls) => `${skills} skills · ${calls} calls`,
           sessionFailed: (n) => ` (${n} failed)`,
@@ -203,6 +211,43 @@ window.__ModuleLoader__.load({
   margin-top: 6px; color: var(--dsw-alias-state-error-primary);
   font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere;
 }
+.sd-diag {
+  margin-top: 7px; overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 35%, var(--dsw-alias-border-l2));
+  border-radius: 8px;
+}
+.sd-diag-head {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: transparent; border: 0; padding: 5px 9px;
+  font: inherit; font-size: 10.5px; cursor: pointer;
+  color: var(--dsw-alias-state-error-primary);
+}
+.sd-diag-head:hover { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent); }
+.sd-diag-toggle { color: var(--dsw-alias-label-secondary); font-size: 10px; }
+.sd-diag-body {
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  padding: 7px 9px; display: flex; flex-direction: column; gap: 8px;
+}
+.sd-diag-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sd-diag-name {
+  color: var(--dsw-alias-label-primary); font-size: 11px; font-weight: 600;
+  display: flex; gap: 6px; align-items: baseline; overflow-wrap: anywhere;
+}
+.sd-diag-phase {
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent);
+  border-radius: 4px; padding: 0 4px; font-size: 9px; line-height: 1.6;
+  color: var(--dsw-alias-state-error-primary); flex: none;
+}
+.sd-diag-module {
+  color: var(--dsw-alias-label-secondary); font-size: 9.5px;
+  font-family: var(--ds-font-family-code, ui-monospace, monospace); overflow-wrap: anywhere;
+}
+.sd-diag-text {
+  color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 120px; overflow: auto;
+}
+.sd-diag-more { color: var(--dsw-alias-label-secondary); font-size: 9.5px; }
 .sd-badge.is-used {
   border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 55%, transparent);
   color: var(--dsw-alias-brand-primary); font-weight: 600;
@@ -406,6 +451,7 @@ window.__ModuleLoader__.load({
       const [query, setQuery] = React.useState('')
       const [mode, setMode] = React.useState('all')
       const [feedback, setFeedback] = React.useState({ name: '', kind: '' })
+      const [diagOpen, setDiagOpen] = React.useState(false)
       const [tick, setTick] = React.useState(0)
       const [zh, setZh] = React.useState({})
 
@@ -659,8 +705,36 @@ window.__ModuleLoader__.load({
           : null,
 
         pluginHealth && pluginHealth.failed > 0
-          ? h('div', { className: 'sd-health-warn' },
-              T.failedList + pluginHealth.failedNames.map((plugin) => plugin.name).join(isZh ? '、' : ', '))
+          ? h('div', { className: 'sd-diag' },
+              h('button', {
+                type: 'button',
+                className: 'sd-diag-head',
+                'aria-expanded': diagOpen ? 'true' : 'false',
+                onClick: () => setDiagOpen((value) => !value),
+              },
+                h('span', { className: 'sd-diag-warn' }, '⚠ ', T.failedList, ' ', String(pluginHealth.failed)),
+                h('span', { className: 'sd-diag-toggle' }, diagOpen ? T.diagCollapse : T.diagExpand),
+              ),
+              diagOpen
+                ? h('div', { className: 'sd-diag-body' },
+                    pluginHealth.failedNames.map((plugin) =>
+                      h('div', { className: 'sd-diag-item', key: plugin.moduleName || plugin.name },
+                        h('div', { className: 'sd-diag-name' },
+                          plugin.name,
+                          plugin.phase ? h('span', { className: 'sd-diag-phase' }, plugin.phase) : null,
+                        ),
+                        plugin.moduleName && plugin.moduleName !== plugin.name
+                          ? h('div', { className: 'sd-diag-module' }, plugin.moduleName)
+                          : null,
+                        h('div', { className: 'sd-diag-text' }, plugin.diagnostic || T.diagEmpty),
+                      ),
+                    ),
+                    pluginHealth.failed > pluginHealth.failedNames.length
+                      ? h('div', { className: 'sd-diag-more' }, T.diagMore(pluginHealth.failed - pluginHealth.failedNames.length))
+                      : null,
+                  )
+                : null,
+            )
           : null,
 
         h('div', { className: 'sd-sticky' },
