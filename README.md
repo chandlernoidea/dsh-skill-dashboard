@@ -42,6 +42,16 @@ Open it from the **Skills** button in the session header, or from the right side
 - **Platforms**: Windows, macOS and Linux. The plugin is plain JavaScript with no platform-specific code; it has been exercised on Windows only.
 - **DSH**: `>=0.2.2-rc.1`, declared in `engines.dsh` and `dsh.compatibility`. Newer builds are not blocked — every host capability is probed at runtime, and a missing one produces an explained empty state instead of a blank panel.
 
+## Publishing
+
+The first release needs a human (GitHub credentials, a push, an npm login). The wizard walks you through it one stage at a time:
+
+```bash
+bash scripts/publish-wizard.sh
+```
+
+It checks the environment, installs and authenticates `gh`, pushes `main`, waits on CI, logs into npm, publishes, and points you at the marketplace step it deliberately does not automate.
+
 ## Taxonomy
 
 Grouping and trigger phrases live in [`taxonomy.json`](taxonomy.json) — plain data, no rebuild:
@@ -129,6 +139,16 @@ plugin_manager({ action: 'install_bundle', target: 'D:/path/to/dsh-skill-dashboa
 
 - **平台**：Windows / macOS / Linux。插件是纯 JS，没有一行平台分支；目前只在 Windows 上实测过。
 - **DSH**：`>=0.2.2-rc.1`，写在 `engines.dsh` 与 `dsh.compatibility` 里。更新的版本不拦——每个宿主能力都在运行时探测，缺了就给出可解释的空态，而不是一片空白。
+
+## 发布
+
+第一次发布有几件事只有人能做（GitHub 凭证、推送、npm 登录）。向导会一步一步带你走：
+
+```bash
+bash scripts/publish-wizard.sh
+```
+
+它依次检查环境、装并登录 `gh`、推送 `main`、等 CI、登录 npm、发布，最后指给你市场那一步——那一步我故意没自动化。
 
 ## 归类表
 
