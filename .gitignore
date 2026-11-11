@@ -20,3 +20,6 @@ desktop.ini
 
 # local research notes (machine-specific paths)
 docs/research/
+
+# pack artifacts
+*.tgz
