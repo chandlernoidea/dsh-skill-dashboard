@@ -17,5 +17,7 @@ jobs:
         run: node --check index.js && node --check client.js && node --check lib/compose.js
       - name: Taxonomy
         run: node tools/check-taxonomy.mjs
+      - name: Package contents
+        run: node tools/check-pack.mjs
       - name: Tests
         run: node --test

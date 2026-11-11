@@ -4,42 +4,50 @@
     {
       "id": "code",
       "title": "写代码",
-      "order": 10
+      "order": 10,
+      "titleEn": "Write code"
     },
     {
       "id": "review",
       "title": "审代码",
-      "order": 20
+      "order": 20,
+      "titleEn": "Review"
     },
     {
       "id": "docs",
       "title": "写文档",
-      "order": 30
+      "order": 30,
+      "titleEn": "Documentation"
     },
     {
       "id": "research",
       "title": "研究查证",
-      "order": 40
+      "order": 40,
+      "titleEn": "Research"
     },
     {
       "id": "design",
       "title": "设计出图",
-      "order": 50
+      "order": 50,
+      "titleEn": "Design and visuals"
     },
     {
       "id": "learn",
       "title": "学习",
-      "order": 60
+      "order": 60,
+      "titleEn": "Learn"
     },
     {
       "id": "harness",
       "title": "维护 harness",
-      "order": 70
+      "order": 70,
+      "titleEn": "Maintain the harness"
     },
     {
       "id": "other",
       "title": "其他",
-      "order": 999
+      "order": 999,
+      "titleEn": "Other"
     }
   ],
   "skills": {

@@ -17,6 +17,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { composeDashboard } from './lib/compose.js'
+import { summarizeAvailability } from './lib/capabilities.js'
 
 export const name = 'dsh-skill-dashboard'
 
@@ -28,7 +29,7 @@ const TAXONOMY_URL = new URL('./taxonomy.json', import.meta.url)
 
 const FALLBACK_TAXONOMY = {
   version: 0,
-  situations: [{ id: 'other', title: '其他', order: 999 }],
+  situations: [{ id: 'other', title: '其他', titleEn: 'Other', order: 999 }],
   skills: {},
 }
 
@@ -169,20 +170,45 @@ export function apply(ctx) {
   }
 
   const handle = async (request) => {
+    const url = new URL(request.url)
     const signal = request?.signal ?? new AbortController().signal
+    const language = url.searchParams.get('lang') || ''
+    const capabilities = summarizeAvailability({
+      sessionSkillCatalog: ctx.get('sessionSkillCatalog') !== undefined,
+      skills: ctx.get('skills') !== undefined,
+      sessions: ctx.get('sessions') !== undefined,
+      translator: ctx.get('translator') !== undefined,
+    })
+
     let result
     try {
-      result = await readCatalog(new URL(request.url), signal)
+      result = await readCatalog(url, signal)
     } catch (error) {
-      return json({ ok: false, error: String(error?.message ?? error), skills: [] }, 500)
-    }
-    if (result.items === null) {
-      return json({ ok: false, error: result.error || 'catalog unavailable', via: result.via, skills: [] }, 503)
+      return json({ ok: false, error: String(error?.message ?? error), skills: [], capabilities }, 500)
     }
 
     const taxonomy = await loadTaxonomy()
     const override = await loadOverride()
-    const composed = composeDashboard({ skills: result.items, taxonomy, override: override.data })
+
+    if (result.items === null) {
+      // Not an HTTP error: the page is reachable, it just has nothing to show.
+      // The Client renders an explained empty state from `capabilities`.
+      const composed = composeDashboard({ skills: [], taxonomy, override: override.data, language })
+      return json({
+        ok: true,
+        via: 'none',
+        note: result.note || '',
+        generatedAt: Date.now(),
+        taxonomyVersion: taxonomy.version ?? 0,
+        overrideFile: override.file,
+        overrideNote: override.note,
+        capabilities,
+        problem: { code: 'no-catalog' },
+        ...composed,
+      })
+    }
+
+    const composed = composeDashboard({ skills: result.items, taxonomy, override: override.data, language })
 
     return json({
       ok: true,
@@ -192,6 +218,7 @@ export function apply(ctx) {
       taxonomyVersion: taxonomy.version ?? 0,
       overrideFile: override.file,
       overrideNote: override.note,
+      capabilities,
       ...composed,
     })
   }

@@ -169,3 +169,25 @@ test('a garbage override is ignored field by field', () => {
   assert.equal(withString.skills[0].situation, 'code')
   assert.equal(withBadEntry.skills[0].situation, 'code')
 })
+
+test('situation titles follow the language, English by default', () => {
+  const bilingual = {
+    situations: [
+      { id: 'code', title: '写代码', titleEn: 'Write code', order: 10 },
+      { id: 'other', title: '其他', titleEn: 'Other', order: 999 },
+    ],
+    skills: {},
+  }
+  const title = (language) => composeDashboard({ skills: [], taxonomy: bilingual, language }).situations[0].title
+
+  assert.equal(title('zh-CN'), '写代码')
+  assert.equal(title('zh'), '写代码')
+  assert.equal(title('en-US'), 'Write code')
+  assert.equal(title('de-DE'), 'Write code')
+  assert.equal(title(undefined), 'Write code')
+})
+
+test('a situation without an English title falls back to its Chinese one', () => {
+  const { situations } = composeDashboard({ skills: [], taxonomy, language: 'en-US' })
+  assert.equal(situations[0].title, '写代码')
+})

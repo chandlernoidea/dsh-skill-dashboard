@@ -34,6 +34,9 @@ for (const [index, situation] of (data.situations ?? []).entries()) {
   if (typeof situation.title !== 'string' || situation.title === '') {
     problems.push(`${where}.title must be a non-empty string`)
   }
+  if (typeof situation.titleEn !== 'string' || situation.titleEn === '') {
+    problems.push(`${where}.titleEn must be a non-empty string`)
+  }
   if (typeof situation.order !== 'number') {
     problems.push(`${where}.order must be a number`)
   } else if (orders.has(situation.order)) {

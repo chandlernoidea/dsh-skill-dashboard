@@ -37,6 +37,11 @@ plugin_manager({ action: 'install_bundle', target: 'dsh-skill-dashboard' })
 
 Open it from the **Skills** button in the session header, or from the right sidebar's `+` → guide.
 
+## Compatibility
+
+- **Platforms**: Windows, macOS and Linux. The plugin is plain JavaScript with no platform-specific code; it has been exercised on Windows only.
+- **DSH**: `>=0.2.2-rc.1`, declared in `engines.dsh` and `dsh.compatibility`. Newer builds are not blocked — every host capability is probed at runtime, and a missing one produces an explained empty state instead of a blank panel.
+
 ## Taxonomy
 
 Grouping and trigger phrases live in [`taxonomy.json`](taxonomy.json) — plain data, no rebuild:
@@ -119,6 +124,11 @@ plugin_manager({ action: 'install_bundle', target: 'D:/path/to/dsh-skill-dashboa
 ```
 
 入口：会话标题栏的「技能」按钮，或右侧栏 `+` → 开始 里的「技能」。
+
+## 兼容性
+
+- **平台**：Windows / macOS / Linux。插件是纯 JS，没有一行平台分支；目前只在 Windows 上实测过。
+- **DSH**：`>=0.2.2-rc.1`，写在 `engines.dsh` 与 `dsh.compatibility` 里。更新的版本不拦——每个宿主能力都在运行时探测，缺了就给出可解释的空态，而不是一片空白。
 
 ## 归类表
 

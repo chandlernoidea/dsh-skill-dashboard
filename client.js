@@ -11,9 +11,7 @@ window.__ModuleLoader__.load({
     const FALLBACK_SITUATIONS = [{ id: 'other', title: '其他', order: 999 }]
 
     // ------------------------------------------------------------------ i18n
-    const ZH = typeof navigator !== 'undefined' && /^zh/i.test(navigator.language || '')
-    const T = ZH
-      ? {
+    const STRINGS_ZH = {
           tab: '技能',
           open: '技能上手台',
           eyebrow: 'SKILL DASHBOARD',
@@ -48,8 +46,12 @@ window.__ModuleLoader__.load({
           copyOrigin: '复制来源',
           insertFailed: '写不进输入框，已复制',
           noSession: '拿不到当前会话',
-        }
-      : {
+          noDataTitle: '读不到技能清单',
+          noDataBody: '当前 DSH 缺少这些能力：',
+          versionHint: '多半是 DSH 版本不匹配——插件依赖的宿主服务在这个版本里不存在。',
+    }
+
+    const STRINGS_EN = {
           tab: 'Skills',
           open: 'Skill dashboard',
           eyebrow: 'SKILL DASHBOARD',
@@ -84,7 +86,24 @@ window.__ModuleLoader__.load({
           copyOrigin: 'Copy origin',
           insertFailed: 'Could not write the composer; copied instead',
           noSession: 'No current session',
-        }
+          noDataTitle: 'Cannot read the skill catalog',
+          noDataBody: 'This DSH is missing:',
+          versionHint: 'Most likely a DSH version mismatch — a host service this plugin needs is absent from this build.',
+    }
+
+    function stringsFor(language) {
+      return /^zh/i.test(language || '') ? STRINGS_ZH : STRINGS_EN
+    }
+
+    function activeLanguage() {
+      try {
+        const snapshot = hostCtx?.get?.('locale')?.getSnapshot?.()
+        if (snapshot && typeof snapshot.active === 'string' && snapshot.active) return snapshot.active
+      } catch (error) {
+        /* no locale service: fall back to the browser */
+      }
+      return typeof navigator !== 'undefined' ? navigator.language || '' : ''
+    }
 
     // --------------------------------------------------------------- helpers
     function firstSentence(text) {
@@ -93,10 +112,11 @@ window.__ModuleLoader__.load({
       return (cut || clean).slice(0, 120)
     }
 
-    function triggerFor(skill) {
+    function triggerFor(skill, language) {
       if (skill.trigger) return skill.trigger
       const desc = firstSentence(skill.whenToUse || skill.description)
-      return ZH ? `用 ${skill.name} 技能：${desc || '按你说的来'}` : `Use the ${skill.name} skill: ${desc || 'as described'}`
+      const isZh = /^zh/i.test(language || '')
+      return isZh ? `用 ${skill.name} 技能：${desc || '按你说的来'}` : `Use the ${skill.name} skill: ${desc || 'as described'}`
     }
 
     function originFor(skill) {
@@ -343,7 +363,9 @@ window.__ModuleLoader__.load({
     // -------------------------------------------------------------- dashboard
     function Dashboard(props) {
       const sessionId = props && props.sessionId ? String(props.sessionId) : ''
-      const [data, setData] = React.useState({ status: 'loading', skills: [], situations: FALLBACK_SITUATIONS, counts: null, error: '', stale: false, overrideNote: '' })
+      const [language, setLanguage] = React.useState(activeLanguage())
+      const T = stringsFor(language)
+      const [data, setData] = React.useState({ status: 'loading', skills: [], situations: FALLBACK_SITUATIONS, counts: null, error: '', stale: false, overrideNote: '', capabilities: null, problem: null })
       const [query, setQuery] = React.useState('')
       const [mode, setMode] = React.useState('all')
       const [feedback, setFeedback] = React.useState({ name: '', kind: '' })
@@ -368,12 +390,30 @@ window.__ModuleLoader__.load({
         }
       }, [sessionId])
 
+      // Follow the host locale: switching the app language must repaint this
+      // tab, including the situation titles the Host already localized.
+      React.useEffect(() => {
+        const locale = hostCtx?.get?.('locale')
+        if (!locale || typeof locale.subscribe !== 'function') return undefined
+        const off = locale.subscribe(() => setLanguage(activeLanguage()))
+        return () => {
+          try {
+            if (typeof off === 'function') off()
+          } catch (error) {
+            /* already disposed */
+          }
+        }
+      }, [])
+
       React.useEffect(() => {
         let alive = true
         const controller = typeof AbortController === 'function' ? new AbortController() : null
 
         const load = () => {
-          const url = sessionId ? ROUTE + '?session=' + encodeURIComponent(sessionId) : ROUTE
+          const params = new URLSearchParams()
+          if (sessionId) params.set('session', sessionId)
+          if (language) params.set('lang', language)
+          const url = params.toString() ? ROUTE + '?' + params.toString() : ROUTE
           fetch(url, controller ? { signal: controller.signal } : undefined)
             .then((response) => response.json())
             .then((payload) => {
@@ -395,6 +435,8 @@ window.__ModuleLoader__.load({
                 error: '',
                 stale: false,
                 overrideNote: String(payload.overrideNote || ''),
+                capabilities: payload.capabilities || null,
+                problem: payload.problem || null,
               })
             })
             .catch((error) => {
@@ -415,7 +457,7 @@ window.__ModuleLoader__.load({
           clearInterval(timer)
           if (controller) controller.abort()
         }
-      }, [tick, sessionId])
+      }, [tick, sessionId, language])
 
       const skills = data.skills || []
       const counts = data.counts || {
@@ -431,7 +473,7 @@ window.__ModuleLoader__.load({
       }
 
       const insert = async (skill) => {
-        const text = triggerFor(skill)
+        const text = triggerFor(skill, language)
         const ok = appendToDraft(sessionId, text)
         if (ok) {
           flash(skill.name, 'inserted')
@@ -442,7 +484,7 @@ window.__ModuleLoader__.load({
       }
 
       const copy = async (skill) => {
-        await copyText(triggerFor(skill))
+        await copyText(triggerFor(skill, language))
         flash(skill.name, 'copied')
       }
 
@@ -452,6 +494,12 @@ window.__ModuleLoader__.load({
         await copyText(origin)
         flash(skill.name + '#origin', 'copied')
       }
+
+      const isZh = /^zh/i.test(language || '')
+      const missingCatalog = ((data.capabilities && data.capabilities.missing) || [])
+        .filter((capability) => capability.role === 'catalog')
+        .map((capability) => (isZh ? capability.label : capability.labelEn))
+        .join(' / ')
 
       const needle = query.trim().toLowerCase()
       const visible = skills.filter((skill) => {
@@ -489,7 +537,7 @@ window.__ModuleLoader__.load({
         const origin = originFor(skill)
         const busy = feedback.name === skill.name
         const originBusy = feedback.name === skill.name + '#origin'
-        const translated = ZH ? zh[skill.name] || skill.zh || '' : ''
+        const translated = isZh ? zh[skill.name] || skill.zh || '' : ''
         const description = translated || skill.description
         return h('div', { className: 'sd-card' + (manual ? ' is-manual' : ''), key: skill.name },
           h('div', { className: 'sd-card-top' },
@@ -503,7 +551,7 @@ window.__ModuleLoader__.load({
           manual
             ? h('div', { className: 'sd-trigger' },
                 h('div', { className: 'sd-trigger-label' }, T.howto),
-                h('div', { className: 'sd-trigger-text' }, triggerFor(skill)),
+                h('div', { className: 'sd-trigger-text' }, triggerFor(skill, language)),
                 h('div', { className: 'sd-actions' },
                   h('button', {
                     type: 'button',
@@ -590,7 +638,15 @@ window.__ModuleLoader__.load({
                 h('div', { className: 'sd-empty-hint' }, data.error || ''),
                 h('button', { type: 'button', className: 'sd-chip', onClick: () => setTick((value) => value + 1) }, T.retry),
               )
-            : visible.length === 0
+            : data.problem
+              ? h('div', { className: 'sd-empty' },
+                  h('div', { className: 'sd-empty-title sd-err' }, T.noDataTitle),
+                  missingCatalog ? h('div', { className: 'sd-empty-hint' }, T.noDataBody) : null,
+                  missingCatalog ? h('div', { className: 'sd-empty-hint' }, missingCatalog) : null,
+                  h('div', { className: 'sd-empty-hint' }, T.versionHint),
+                  h('button', { type: 'button', className: 'sd-chip', onClick: () => setTick((value) => value + 1) }, T.retry),
+                )
+              : visible.length === 0
               ? h('div', { className: 'sd-empty' },
                   h('div', { className: 'sd-empty-title' }, T.empty),
                   h('div', { className: 'sd-empty-hint' }, T.emptyHint),
@@ -610,7 +666,7 @@ window.__ModuleLoader__.load({
     }
 
     function TabTitle() {
-      return h('span', null, T.tab)
+      return h('span', null, stringsFor(activeLanguage()).tab)
     }
 
     // --------------------------------------------------------- header button
@@ -671,12 +727,13 @@ window.__ModuleLoader__.load({
     }
 
     function OpenButton() {
+      const strings = stringsFor(activeLanguage())
       return h('button', {
         type: 'button',
         className: 'sd-hbtn',
-        title: T.open,
+        title: strings.open,
         onClick: openDashboard,
-      }, T.tab)
+      }, strings.tab)
     }
 
     // ------------------------------------------------------------- lifecycle
@@ -718,13 +775,13 @@ window.__ModuleLoader__.load({
           ctx.effect(() => tabs.register({
             id: TAB_ID,
             kind: TAB_KIND,
-            title: () => T.tab,
+            title: () => stringsFor(activeLanguage()).tab,
             keepMounted: true,
             guide: [{
               id: TAB_ID,
               order: 20,
-              title: () => T.tab,
-              description: () => T.guideDesc,
+              title: () => stringsFor(activeLanguage()).tab,
+              description: () => stringsFor(activeLanguage()).guideDesc,
               icon: (props) => h(GuideIcon, props || {}),
             }],
           }), 'skill-dashboard: tab type')
@@ -747,7 +804,7 @@ window.__ModuleLoader__.load({
             name: 'conversation.session.header.utilities',
             id: 'dsh-skill-dashboard:open',
             order: 14,
-            label: T.tab,
+            label: () => stringsFor(activeLanguage()).tab,
           }, OpenButton))
         }
       },
