@@ -288,6 +288,8 @@ if [[ "$current_registry" != *"registry.npmjs.org"* ]]; then
 fi
 open_url "https://www.npmjs.com/signup"
 say "没有账号先注册（免费），有账号直接登录。"
+note "注册页被 Cloudflare 拦住（提示「你不是机器人 / 访问受限」）时：换手机热点或 VPN，"
+note "或者用手机 4G 注册，再回电脑登录。实在过不去就先走 GitHub Release 的 tarball。"
 step "命令：npm login --registry=$npm_registry"
 note "它打印一行 URL 并让你按 Enter；按了之后浏览器没开，就把那行 URL 复制到浏览器打开"
 if confirm "现在跑这条命令？"; then
