@@ -1,7 +1,8 @@
 param(
-  [int]$ProcessId = 8124,
-  [string]$Out = "D:\00code\dsh\plug\.shots\app.png"
+  [Parameter(Mandatory = $true)][int]$ProcessId,
+  [string]$Out = ""
 )
+if (-not $Out) { $Out = Join-Path $PSScriptRoot "..\.shots\app.png" }
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing

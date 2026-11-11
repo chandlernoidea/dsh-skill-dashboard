@@ -1,6 +1,6 @@
 param(
   [string]$Keys = '^r',
-  [int]$ProcessId = 8124
+  [Parameter(Mandatory = $true)][int]$ProcessId
 )
 
 Add-Type @'
