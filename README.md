@@ -20,6 +20,7 @@ The dashboard is the missing index for both.
 - **Search and filters**: name or description, name-only, on-disk, registry-only.
 - **Origin** per card: the repository URL when the taxonomy knows it, the file path otherwise, one click to copy.
 - **Live catalog**: it reads the host's `sessionSkillCatalog`, so user, project, bundled and runtime-registered skills all appear, and a skill installed later shows up on the next refresh (30s).
+- **Health at a glance**: how many plugins are active, failed or switched off, and how many skills this session has actually called — the summary sits above the list, and each used skill carries a `×N` badge.
 
 ## Install
 
@@ -124,6 +125,7 @@ MIT.
 - **搜索与筛选**：名字/说明、只看需点名、只看有文件、只看注册表。
 - **来源**：taxonomy 里有仓库地址就显示地址，否则显示文件路径，一键复制。
 - 数据来自宿主的 `sessionSkillCatalog`，用户/项目/随包/注册表型技能都在；新装的 30 秒内自动出现。
+- **状态一览**：顶部两个胶囊告诉你多少插件活跃 / 失败 / 停用，以及本会话真正调用过几个技能；用过的技能卡片右上角带 `×N` 角标。
 
 ## 安装
 

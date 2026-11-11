@@ -8,6 +8,7 @@ const REQUIRED = [
   'client.js',
   'lib/compose.js',
   'lib/capabilities.js',
+  'lib/usage.js',
   'taxonomy.json',
   'cordis.patch.yml',
   'locale/en.json',

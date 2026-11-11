@@ -46,6 +46,16 @@ window.__ModuleLoader__.load({
           copyOrigin: '复制来源',
           insertFailed: '写不进输入框，已复制',
           noSession: '拿不到当前会话',
+          plugins: '插件',
+          pluginActive: '活跃',
+          pluginFailed: '失败',
+          pluginDisabled: '停用',
+          failedList: '失败：',
+          sessionLabel: '本会话',
+          sessionUsage: (skills, calls) => `用过 ${skills} 个技能 · ${calls} 次调用`,
+          sessionFailed: (n) => `（${n} 次失败）`,
+          sessionOnlyFailed: (n) => `${n} 次尝试都失败`,
+          sessionEmpty: '还没调用过技能',
           noDataTitle: '读不到技能清单',
           noDataBody: '当前 DSH 缺少这些能力：',
           versionHint: '多半是 DSH 版本不匹配——插件依赖的宿主服务在这个版本里不存在。',
@@ -86,6 +96,16 @@ window.__ModuleLoader__.load({
           copyOrigin: 'Copy origin',
           insertFailed: 'Could not write the composer; copied instead',
           noSession: 'No current session',
+          plugins: 'Plugins',
+          pluginActive: 'active',
+          pluginFailed: 'failed',
+          pluginDisabled: 'disabled',
+          failedList: 'Failed:',
+          sessionLabel: 'This session',
+          sessionUsage: (skills, calls) => `${skills} skills · ${calls} calls`,
+          sessionFailed: (n) => ` (${n} failed)`,
+          sessionOnlyFailed: (n) => `all ${n} attempts failed`,
+          sessionEmpty: 'No skill call yet in this session',
           noDataTitle: 'Cannot read the skill catalog',
           noDataBody: 'This DSH is missing:',
           versionHint: 'Most likely a DSH version mismatch — a host service this plugin needs is absent from this build.',
@@ -170,6 +190,23 @@ window.__ModuleLoader__.load({
 .sd-stat-value { font-size: 17px; font-weight: 680; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .sd-stat.is-manual { border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 42%, var(--dsw-alias-border-l2)); }
 .sd-stat.is-manual .sd-stat-value { color: var(--dsw-alias-state-warn-primary); }
+.sd-health { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.sd-pill {
+  border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px;
+  padding: 1px 9px; color: var(--dsw-alias-label-secondary);
+  font-size: 10.5px; line-height: 1.75; white-space: nowrap;
+}
+.sd-pill b { color: var(--dsw-alias-label-primary); font-weight: 650; font-variant-numeric: tabular-nums; }
+.sd-pill-bad { color: var(--dsw-alias-state-error-primary); font-weight: 650; }
+.sd-pill-muted { opacity: .75; }
+.sd-health-warn {
+  margin-top: 6px; color: var(--dsw-alias-state-error-primary);
+  font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere;
+}
+.sd-badge.is-used {
+  border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 55%, transparent);
+  color: var(--dsw-alias-brand-primary); font-weight: 600;
+}
 .sd-sticky {
   position: sticky; top: 0; z-index: 3;
   margin: 0 -12px; padding: 8px 12px 7px;
@@ -365,7 +402,7 @@ window.__ModuleLoader__.load({
       const sessionId = props && props.sessionId ? String(props.sessionId) : ''
       const [language, setLanguage] = React.useState(activeLanguage())
       const T = stringsFor(language)
-      const [data, setData] = React.useState({ status: 'loading', skills: [], situations: FALLBACK_SITUATIONS, counts: null, error: '', stale: false, overrideNote: '', capabilities: null, problem: null })
+      const [data, setData] = React.useState({ status: 'loading', skills: [], situations: FALLBACK_SITUATIONS, counts: null, error: '', stale: false, overrideNote: '', capabilities: null, problem: null, plugins: null, usage: null })
       const [query, setQuery] = React.useState('')
       const [mode, setMode] = React.useState('all')
       const [feedback, setFeedback] = React.useState({ name: '', kind: '' })
@@ -437,6 +474,8 @@ window.__ModuleLoader__.load({
                 overrideNote: String(payload.overrideNote || ''),
                 capabilities: payload.capabilities || null,
                 problem: payload.problem || null,
+                plugins: payload.plugins || null,
+                usage: payload.usage || null,
               })
             })
             .catch((error) => {
@@ -496,8 +535,19 @@ window.__ModuleLoader__.load({
       }
 
       const isZh = /^zh/i.test(language || '')
-      const missingCatalog = ((data.capabilities && data.capabilities.missing) || [])
-        .filter((capability) => capability.role === 'catalog')
+      const pluginHealth = data.plugins
+      const usageBySkill = (data.usage && data.usage.byName) || {}
+      const usedSkills = Object.keys(usageBySkill).length
+      const usedCalls = (data.usage && data.usage.total) || 0
+      const failedCalls = (data.usage && data.usage.failed) || 0
+      const usageText = !data.usage
+        ? ''
+        : usedSkills === 0 && usedCalls === 0
+          ? failedCalls > 0
+            ? T.sessionOnlyFailed(failedCalls)
+            : T.sessionEmpty
+          : T.sessionUsage(usedSkills, usedCalls) + (failedCalls > 0 ? T.sessionFailed(failedCalls) : '')
+      const missingCatalog = ((data.capabilities && data.capabilities.missing) || [])        .filter((capability) => capability.role === 'catalog')
         .map((capability) => (isZh ? capability.label : capability.labelEn))
         .join(' / ')
 
@@ -545,6 +595,7 @@ window.__ModuleLoader__.load({
             h('div', { className: 'sd-badges' },
               manual ? h('span', { className: 'sd-badge is-manual' }, T.badgeManual) : h('span', { className: 'sd-badge' }, T.badgeAuto),
               skill.situationSource === 'heuristic' ? h('span', { className: 'sd-badge' }, T.auto) : null,
+              usageBySkill[skill.name] > 0 ? h('span', { className: 'sd-badge is-used' }, '×' + usageBySkill[skill.name]) : null,
             ),
           ),
           description ? h('p', { className: 'sd-desc', title: translated ? skill.description : undefined }, description) : null,
@@ -586,6 +637,31 @@ window.__ModuleLoader__.load({
           h('div', { className: 'sd-title' }, T.title),
           h('div', { className: 'sd-sub' }, T.subtitle(counts.total, counts.manual)),
         ),
+
+        pluginHealth || data.usage
+          ? h('div', { className: 'sd-health' },
+              pluginHealth
+                ? h('span', { className: 'sd-pill' },
+                    T.plugins, ' ', h('b', null, String(pluginHealth.total)), ' · ',
+                    h('b', null, String(pluginHealth.active)), ' ', T.pluginActive,
+                    pluginHealth.failed > 0
+                      ? h('span', { className: 'sd-pill-bad' }, ' · ', String(pluginHealth.failed), ' ', T.pluginFailed)
+                      : null,
+                    pluginHealth.disabled > 0
+                      ? h('span', { className: 'sd-pill-muted' }, ' · ', String(pluginHealth.disabled), ' ', T.pluginDisabled)
+                      : null,
+                  )
+                : null,
+              data.usage
+                ? h('span', { className: 'sd-pill' }, T.sessionLabel, ' ', usageText)
+                : null,
+            )
+          : null,
+
+        pluginHealth && pluginHealth.failed > 0
+          ? h('div', { className: 'sd-health-warn' },
+              T.failedList + pluginHealth.failedNames.map((plugin) => plugin.name).join(isZh ? '、' : ', '))
+          : null,
 
         h('div', { className: 'sd-sticky' },
           h('div', { className: 'sd-search-row' },

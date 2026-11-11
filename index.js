@@ -18,6 +18,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { composeDashboard } from './lib/compose.js'
 import { summarizeAvailability } from './lib/capabilities.js'
+import { tallySkillUsage } from './lib/usage.js'
 
 export const name = 'dsh-skill-dashboard'
 
@@ -105,6 +106,64 @@ function fromSummary(summary) {
   }
 }
 
+function titleOf(meta) {
+  if (meta === null || typeof meta !== 'object') return ''
+  const title = meta.title
+  if (typeof title === 'string') return title
+  if (title !== null && typeof title === 'object') return title.en ?? title['zh-CN'] ?? ''
+  return ''
+}
+
+/**
+ * Plugin health straight from the manager: which rows are loading, active,
+ * failed or switched off. A row without a fiber phase is not a running plugin
+ * (a tool row, for instance), so it is counted but never as active.
+ */
+async function readPlugins(ctx) {
+  try {
+    const manager = ctx.get('pluginManager')
+    if (manager === undefined || typeof manager.listPlugins !== 'function') return null
+    const rows = await manager.listPlugins()
+    if (!Array.isArray(rows)) return null
+    const failed = rows.filter((row) => row.fiberPhase === 'failed' || Boolean(row.diagnostic))
+    return {
+      total: rows.length,
+      active: rows.filter((row) => row.fiberPhase === 'active').length,
+      failed: failed.length,
+      disabled: rows.filter((row) => row.enabled === false).length,
+      failedNames: failed
+        .map((row) => ({ name: titleOf(row.meta) || row.moduleName || String(row.entryId), diagnostic: row.diagnostic || '' }))
+        .slice(0, 8),
+    }
+  } catch (error) {
+    console.warn('skill-dashboard: plugin inventory unavailable', error)
+    return null
+  }
+}
+
+/**
+ * Skill calls in ONE live session, read from the session the host already
+ * holds in memory. No log scan, no persistence read: `ownEvents()` is the
+ * live event list this process is already keeping.
+ */
+function readUsage(ctx, sessionId) {
+  try {
+    if (!sessionId) return null
+    const sessions = ctx.get('sessions')
+    const session = sessions?.get?.(sessionId)
+    if (!session) return null
+    // `ownEvents()` is only what this process appended; after a restart the
+    // history is inherited, so count the whole log instead.
+    const events =
+      typeof session.snapshotEvents === 'function' ? session.snapshotEvents() : typeof session.ownEvents === 'function' ? session.ownEvents() : []
+    const { total, byName } = tallySkillUsage(events)
+    return { sessionId, total, byName }
+  } catch (error) {
+    console.warn('skill-dashboard: usage unavailable', error)
+    return null
+  }
+}
+
 export function apply(ctx) {
   const server = ctx.get('webServer')
   if (server === undefined) {
@@ -189,6 +248,9 @@ export function apply(ctx) {
 
     const taxonomy = await loadTaxonomy()
     const override = await loadOverride()
+    const sessionId = url.searchParams.get('session') || currentSessionId()
+    const plugins = await readPlugins(ctx)
+    const usage = readUsage(ctx, sessionId)
 
     if (result.items === null) {
       // Not an HTTP error: the page is reachable, it just has nothing to show.
@@ -203,6 +265,8 @@ export function apply(ctx) {
         overrideFile: override.file,
         overrideNote: override.note,
         capabilities,
+        plugins,
+        usage,
         problem: { code: 'no-catalog' },
         ...composed,
       })
@@ -219,6 +283,8 @@ export function apply(ctx) {
       overrideFile: override.file,
       overrideNote: override.note,
       capabilities,
+      plugins,
+      usage,
       ...composed,
     })
   }
