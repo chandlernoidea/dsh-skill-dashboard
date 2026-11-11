@@ -14,6 +14,8 @@
  */
 
 import { readFile, stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { composeDashboard } from './lib/compose.js'
 
 export const name = 'dsh-skill-dashboard'
@@ -56,6 +58,22 @@ function json(body, status = 200) {
       'cache-control': 'no-store',
     },
   })
+}
+
+/**
+ * The user's own override table. Absent is normal — no note. Unreadable or
+ * malformed is ignored, and the note reaches the Client so the user is told
+ * instead of silently wondering why their edit did nothing.
+ */
+async function loadOverride() {
+  const file = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skill-dashboard', 'taxonomy.json')
+  try {
+    const raw = await readFile(file, 'utf8')
+    return { data: JSON.parse(raw), file, note: '' }
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { data: null, file, note: '' }
+    return { data: null, file, note: `覆盖表读取失败，已忽略：${error?.message ?? error}` }
+  }
 }
 
 function fromEntry(entry) {
@@ -163,7 +181,8 @@ export function apply(ctx) {
     }
 
     const taxonomy = await loadTaxonomy()
-    const composed = composeDashboard({ skills: result.items, taxonomy })
+    const override = await loadOverride()
+    const composed = composeDashboard({ skills: result.items, taxonomy, override: override.data })
 
     return json({
       ok: true,
@@ -171,6 +190,8 @@ export function apply(ctx) {
       note: result.note || '',
       generatedAt: Date.now(),
       taxonomyVersion: taxonomy.version ?? 0,
+      overrideFile: override.file,
+      overrideNote: override.note,
       ...composed,
     })
   }

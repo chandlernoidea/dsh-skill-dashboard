@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { composeDashboard, inferSituation } from '../lib/compose.js'
+import { composeDashboard, inferSituation, mergeTaxonomy } from '../lib/compose.js'
 
 const taxonomy = {
   situations: [
@@ -120,4 +120,52 @@ test('a skill nothing matches is unmapped and counted', () => {
 test('composition is pure: same input, same output', () => {
   const input = { skills: [skill('tdd'), skill('random-widget')], taxonomy }
   assert.deepEqual(composeDashboard(input), composeDashboard(input))
+})
+
+test('an override moves a skill to another situation', () => {
+  const { skills } = composeDashboard({
+    skills: [skill('handoff')],
+    taxonomy,
+    override: { skills: { handoff: { situation: 'code' } } },
+  })
+  assert.equal(skills[0].situation, 'code')
+})
+
+test('an override keeps the packaged trigger when it only changes the situation', () => {
+  const { skills } = composeDashboard({
+    skills: [skill('handoff')],
+    taxonomy,
+    override: { skills: { handoff: { situation: 'code' } } },
+  })
+  assert.equal(skills[0].trigger, '用 handoff 把这次对话整理成交接文档')
+  assert.equal(skills[0].zh, '把当前对话压缩成一份交接文档。')
+})
+
+test('an override can add a situation', () => {
+  const { situations } = composeDashboard({
+    skills: [],
+    taxonomy,
+    override: { situations: [{ id: 'video', title: '做视频', order: 40 }] },
+  })
+  assert.deepEqual(situations.map((situation) => situation.id), ['code', 'docs', 'video', 'other'])
+})
+
+test('an override cannot remove a packaged skill or situation', () => {
+  const merged = mergeTaxonomy(taxonomy, { situations: [], skills: {} })
+  assert.equal(Object.keys(merged.skills).length, Object.keys(taxonomy.skills).length)
+  assert.equal(merged.situations.length, taxonomy.situations.length)
+})
+
+test('a garbage override is ignored field by field', () => {
+  const withArray = composeDashboard({ skills: [skill('tdd')], taxonomy, override: [] })
+  const withString = composeDashboard({ skills: [skill('tdd')], taxonomy, override: 'nope' })
+  const withBadEntry = composeDashboard({
+    skills: [skill('tdd')],
+    taxonomy,
+    override: { skills: { tdd: null, other: { situation: 'docs' } } },
+  })
+
+  assert.equal(withArray.skills[0].situation, 'code')
+  assert.equal(withString.skills[0].situation, 'code')
+  assert.equal(withBadEntry.skills[0].situation, 'code')
 })

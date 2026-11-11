@@ -57,6 +57,16 @@ Grouping and trigger phrases live in [`taxonomy.json`](taxonomy.json) — plain 
 - `repo` is optional; it turns the origin line into a copyable repository URL.
 - `node tools/check-taxonomy.mjs` validates the file (CI runs it too).
 
+### Your own override
+
+Put a file at `~/.dsh/skill-dashboard/taxonomy.json` with the same shape. It is layered over the packaged table per skill, so you can move your own skills without touching the package:
+
+```json
+{ "skills": { "my-deploy-helper": { "situation": "harness" } } }
+```
+
+Overrides can add situations and change skills — they never delete a packaged entry. A malformed file is ignored, and the dashboard shows a line saying so instead of going blank.
+
 ## Non-goals
 
 This plugin is **read-only by design** — see [ADR 0001](docs/adr/0001-read-only-by-design.md). It does not install, uninstall, update, enable or disable skills; `@michengai/dsh-skills-manager` and `@linxin666/dsh-client-ui-skill-explorer` already own that, and a second installer would only drift.
@@ -118,6 +128,16 @@ plugin_manager({ action: 'install_bundle', target: 'D:/path/to/dsh-skill-dashboa
 - `trigger` 可省，省了就用技能自己的 description 自动生成。
 - `repo` 可省，填了来源行就变成可复制的仓库地址。
 - `node tools/check-taxonomy.mjs` 校验，CI 也会跑。
+
+### 你自己的覆盖表
+
+把同结构的文件放到 `~/.dsh/skill-dashboard/taxonomy.json`，它会按技能名叠加在包内表上——你机器上的技能可以自己归位，不用改包里的文件：
+
+```json
+{ "skills": { "my-deploy-helper": { "situation": "harness" } } }
+```
+
+覆盖表能加处境、改技能，但**删不掉**包内已有条目。文件写坏时会被忽略，界面上会多一行说明，而不是直接空白。
 
 ## 非目标
 

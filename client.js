@@ -269,6 +269,12 @@ window.__ModuleLoader__.load({
 .sd-btn-mini.is-primary { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent); font-weight: 600; }
 .sd-btn-mini.is-done { border-color: var(--dsw-alias-state-success-primary); color: var(--dsw-alias-state-success-primary); }
 .sd-trigger-note { color: var(--dsw-alias-label-secondary); font-size: 9.5px; line-height: 1.5; }
+.sd-notice {
+  margin-top: 10px;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 35%, var(--dsw-alias-border-l2));
+  border-radius: 8px; padding: 6px 9px;
+  color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1.5;
+}
 .sd-origin {
   display: flex; align-items: center; gap: 6px;
   border-top: 1px dashed var(--dsw-alias-border-l1);
@@ -337,7 +343,7 @@ window.__ModuleLoader__.load({
     // -------------------------------------------------------------- dashboard
     function Dashboard(props) {
       const sessionId = props && props.sessionId ? String(props.sessionId) : ''
-      const [data, setData] = React.useState({ status: 'loading', skills: [], situations: FALLBACK_SITUATIONS, counts: null, error: '', stale: false })
+      const [data, setData] = React.useState({ status: 'loading', skills: [], situations: FALLBACK_SITUATIONS, counts: null, error: '', stale: false, overrideNote: '' })
       const [query, setQuery] = React.useState('')
       const [mode, setMode] = React.useState('all')
       const [feedback, setFeedback] = React.useState({ name: '', kind: '' })
@@ -388,6 +394,7 @@ window.__ModuleLoader__.load({
                 counts: payload.counts || null,
                 error: '',
                 stale: false,
+                overrideNote: String(payload.overrideNote || ''),
               })
             })
             .catch((error) => {
@@ -563,6 +570,7 @@ window.__ModuleLoader__.load({
           ),
         ),
 
+        data.overrideNote ? h('div', { className: 'sd-notice' }, data.overrideNote) : null,
         data.stale ? h('div', { className: 'sd-banner' }, h('div', { className: 'sd-banner-body' }, T.stale)) : null,
 
         showBanner
