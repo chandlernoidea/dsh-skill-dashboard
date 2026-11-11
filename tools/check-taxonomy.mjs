@@ -60,6 +60,9 @@ if (data.skills === null || typeof data.skills !== 'object' || Array.isArray(dat
     if (entry.trigger !== undefined && (typeof entry.trigger !== 'string' || entry.trigger.trim() === '')) {
       problems.push(`${where}.trigger must be a non-empty string when present`)
     }
+    if (entry.zh !== undefined && (typeof entry.zh !== 'string' || entry.zh.trim() === '')) {
+      problems.push(`${where}.zh must be a non-empty string when present`)
+    }
     if (entry.repo !== undefined && (typeof entry.repo !== 'string' || !/^https?:\/\//.test(entry.repo))) {
       problems.push(`${where}.repo must be an http(s) URL when present`)
     }

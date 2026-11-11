@@ -17,3 +17,5 @@ jobs:
         run: node --check index.js && node --check client.js
       - name: Taxonomy
         run: node tools/check-taxonomy.mjs
+      - name: Inference
+        run: node tools/check-inference.mjs

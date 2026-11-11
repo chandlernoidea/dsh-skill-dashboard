@@ -57,15 +57,18 @@
     },
     "implement": {
       "situation": "code",
-      "trigger": "用 implement 把这张工单实现掉"
+      "trigger": "用 implement 把这张工单实现掉",
+      "zh": "按规格或工单实现一块工作。"
     },
     "implement-spec": {
       "situation": "code",
-      "trigger": "用 implement-spec 按这份规格一条条实现"
+      "trigger": "用 implement-spec 按这份规格一条条实现",
+      "zh": "把 /to-spec 和 /to-tickets 的产出逐条实现成代码。"
     },
     "improve-codebase-architecture": {
       "situation": "code",
-      "trigger": "用 improve-codebase-architecture 找一下这块的加深机会"
+      "trigger": "用 improve-codebase-architecture 找一下这块的加深机会",
+      "zh": "扫一遍代码库找「可以加深的模块」，出一份可视化 HTML 报告，再逐条 grill。"
     },
     "prototype": {
       "situation": "code"
@@ -78,7 +81,8 @@
     },
     "triage": {
       "situation": "review",
-      "trigger": "triage 一下新来的 issue"
+      "trigger": "triage 一下新来的 issue",
+      "zh": "把外部来的 issue 走一遍 triage 状态机，变成 agent 可执行的工单。"
     },
     "grilling": {
       "situation": "review"
@@ -91,23 +95,28 @@
     },
     "wayfinder": {
       "situation": "review",
-      "trigger": "用 wayfinder 把这块不确定的地方铺成一张地图"
+      "trigger": "用 wayfinder 把这块不确定的地方铺成一张地图",
+      "zh": "把一大块看不清方向的工作铺成一张决策地图，一张一张解。"
     },
     "handoff": {
       "situation": "docs",
-      "trigger": "用 handoff 把这次对话整理成交接文档"
+      "trigger": "用 handoff 把这次对话整理成交接文档",
+      "zh": "把当前对话压缩成一份交接文档，给另一个 agent 接手用。"
     },
     "to-spec": {
       "situation": "docs",
-      "trigger": "用 to-spec 把这套需求写成一份规格"
+      "trigger": "用 to-spec 把这套需求写成一份规格",
+      "zh": "把当前对话变成一份可执行的规格，并发到 issue tracker。"
     },
     "to-tickets": {
       "situation": "docs",
-      "trigger": "用 to-tickets 把这些工单拆出来"
+      "trigger": "用 to-tickets 把这些工单拆出来",
+      "zh": "把计划/规格/对话拆成一串 tracer-bullet 工单，每张标明阻塞关系。"
     },
     "to-questionnaire": {
       "situation": "docs",
-      "trigger": "用 to-questionnaire 把这些需求做成一问卷"
+      "trigger": "用 to-questionnaire 把这些需求做成一问卷",
+      "zh": "把你答不上来的决定做成一份问卷，交给别人填。"
     },
     "writing-for-agents": {
       "situation": "docs"
@@ -153,15 +162,18 @@
     },
     "teach": {
       "situation": "learn",
-      "trigger": "用 teach 带我从零学这个主题"
+      "trigger": "用 teach 带我从零学这个主题",
+      "zh": "带你在当前目录里，从一个新技能或概念学起。"
     },
     "wait-what": {
       "situation": "learn",
-      "trigger": "wait-what：等等，你刚才那段我没听懂，重讲一遍"
+      "trigger": "wait-what：等等，你刚才那段我没听懂，重讲一遍",
+      "zh": "上一段没听懂，用更平实的话重讲一遍。"
     },
     "setup-matt-pocock-skills": {
       "situation": "harness",
-      "trigger": "跑 /setup-matt-pocock-skills，把这个仓库的 issue tracker、triage 标签和 domain docs 配好"
+      "trigger": "跑 /setup-matt-pocock-skills，把这个仓库的 issue tracker、triage 标签和 domain docs 配好",
+      "zh": "配置这个仓库的 issue tracker、triage 标签和 domain docs 布局。"
     },
     "skill-curator": {
       "situation": "harness"
@@ -174,7 +186,8 @@
     },
     "retro": {
       "situation": "harness",
-      "trigger": "用 retro 做一次复盘"
+      "trigger": "用 retro 做一次复盘",
+      "zh": "对一次编码会话做复盘，重点改环境而不是改代码。"
     },
     "wizard": {
       "situation": "harness"

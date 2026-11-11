@@ -22,7 +22,65 @@ export const name = 'dsh-skill-dashboard'
 export const inject = ['webServer']
 
 const ROUTE_PATH = '/api/skill-dash/data'
+const ZH_PATH = '/api/skill-dash/zh'
 const TAXONOMY_URL = new URL('./taxonomy.json', import.meta.url)
+
+// Situation inference for skills that `taxonomy.json` does not list — a user who
+// installs their own skills still gets them sorted. Order = first strong match
+// wins; otherwise the most keyword hits above a threshold decides.
+const STRONG_RULES = [
+  [/pptx|docx|xlsx|spreadsheet|幻灯片|表格/i, 'docs'],
+  [/blender|drawai|diagram|canvas|文字成片|视频/i, 'design'],
+  [/\btdd\b|单元测试/i, 'code'],
+  [/cordis|harness|sandbox|沙箱/i, 'harness'],
+]
+
+const SITUATION_RULES = [
+  { id: 'docs', re: /(office|pdf|readme|handoff|spec\b|ticket|questionnaire|document|report|文档|工单|规格|报告)/gi },
+  { id: 'design', re: /(diagram|chart|draw|video|motion|render|image|svg|图|画布|建模|出图)/gi },
+  { id: 'review', re: /(review|audit|critique|triage|lint|grill|审查|评审|复盘|把关)/gi },
+  { id: 'research', re: /(research|investigate|survey|literature|search|调研|检索|查证)/gi },
+  { id: 'learn', re: /(teach|learn|tutorial|explain|course|学习|教程|讲解)/gi },
+  { id: 'harness', re: /(plugin|cordis|harness|sandbox|preset|hook|config|插件|配置)/gi },
+  { id: 'code', re: /(code|bug|debug|refactor|test|implement|build|compile|patch|feature|代码|重构|测试|实现|修复)/gi },
+]
+
+export function inferSituation(name, description) {
+  const text = `${name} ${description}`
+  for (const [re, id] of STRONG_RULES) if (re.test(text)) return id
+  let best = null
+  for (const rule of SITUATION_RULES) {
+    const hits = (text.match(rule.re) || []).length
+    if (hits > 0 && (best === null || hits > best.hits)) best = { id: rule.id, hits }
+  }
+  return best !== null && best.hits >= 1 ? best.id : null
+}
+
+function labelWithTaxonomy(items, taxonomy) {
+  const byName = taxonomy.skills ?? {}
+  return items.map((item) => {
+    const entry = byName[item.name] ?? null
+    if (entry !== null) {
+      return {
+        ...item,
+        situation: entry.situation,
+        situationSource: 'taxonomy',
+        trigger: typeof entry.trigger === 'string' ? entry.trigger : '',
+        zh: typeof entry.zh === 'string' ? entry.zh : '',
+        repo: typeof entry.repo === 'string' ? entry.repo : '',
+      }
+    }
+    const inferred = inferSituation(item.name, item.description)
+    return {
+      ...item,
+      situation: inferred ?? 'other',
+      situationSource: inferred === null ? 'unmapped' : 'heuristic',
+      trigger: '',
+      zh: '',
+      repo: '',
+    }
+  })
+}
 
 const FALLBACK_TAXONOMY = {
   version: 0,
@@ -90,19 +148,6 @@ function fromSummary(summary) {
     modelInvocable: invocation.modelInvocable !== false,
     userInvocable: invocation.userInvocable !== false,
   }
-}
-
-function labelWithTaxonomy(items, taxonomy) {
-  const byName = taxonomy.skills ?? {}
-  return items.map((item) => {
-    const entry = byName[item.name] ?? null
-    return {
-      ...item,
-      situation: entry?.situation ?? 'other',
-      trigger: typeof entry?.trigger === 'string' ? entry.trigger : '',
-      repo: typeof entry?.repo === 'string' ? entry.repo : '',
-    }
-  })
 }
 
 export function apply(ctx) {
@@ -209,6 +254,84 @@ export function apply(ctx) {
       kind: 'exact',
       path: ROUTE_PATH,
       resource: async (request) => handle(request),
+    }),
+  )
+
+  // On-the-spot Chinese for the manual-only skills. They are the ones a user
+  // must name, so their description is the thing that has to be readable.
+  // Anonymous providers (google/bing) need no session and no key.
+  const zhCache = new Map()
+
+  const handleZh = async (request) => {
+    const url = new URL(request.url)
+    const signal = request?.signal
+    const translator = ctx.get('translator')
+    if (translator === undefined) return json({ ok: true, zh: {}, skipped: 'translator unavailable' })
+
+    let providers
+    try {
+      providers = await translator.availableProviders(signal)
+    } catch (error) {
+      return json({ ok: true, zh: {}, skipped: String(error?.message ?? error) })
+    }
+    if (!Array.isArray(providers) || providers.length === 0) {
+      return json({ ok: true, zh: {}, skipped: 'no translation provider' })
+    }
+
+    const sessionId = url.searchParams.get('session') || currentSessionId()
+    const free = providers.find((provider) => provider === 'bing' || provider === 'google')
+    const provider = free ?? providers[0]
+    const needsSession = free === undefined
+
+    let result
+    try {
+      result = await readCatalog(url, signal)
+    } catch (error) {
+      return json({ ok: false, zh: {}, error: String(error?.message ?? error) }, 500)
+    }
+
+    const targets = (result.items ?? []).filter((item) => item.modelInvocable === false && item.description)
+    const out = {}
+    let skipped = ''
+    const deadline = Date.now() + 7000
+
+    for (const item of targets) {
+      const text = String(item.description).slice(0, 400)
+      if (zhCache.has(text)) {
+        out[item.name] = zhCache.get(text)
+        continue
+      }
+      if (Date.now() > deadline) {
+        skipped = 'time budget'
+        break
+      }
+      try {
+        const spec = translator.resolve({
+          text,
+          targetLanguage: 'zh-CN',
+          sourceLanguage: 'en',
+          provider,
+          ...(needsSession && sessionId ? { sessionId } : {}),
+        })
+        const translated = await translator.translate(spec, signal)
+        if (typeof translated === 'string' && translated.trim() !== '') {
+          zhCache.set(text, translated)
+          out[item.name] = translated
+        }
+      } catch (error) {
+        skipped = String(error?.message ?? error)
+        break
+      }
+    }
+
+    return json({ ok: true, zh: out, skipped })
+  }
+
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: ZH_PATH,
+      resource: async (request) => handleZh(request),
     }),
   )
 }

@@ -7,6 +7,7 @@ window.__ModuleLoader__.load({
     const TAB_ID = 'dsh-skill-dashboard'
     const TAB_KIND = 'skill-dashboard'
     const ROUTE = '/api/skill-dash/data'
+    const ZH_ROUTE = '/api/skill-dash/zh'
     const FALLBACK_SITUATIONS = [{ id: 'other', title: '其他', order: 999 }]
 
     // ------------------------------------------------------------------ i18n
@@ -41,6 +42,7 @@ window.__ModuleLoader__.load({
           subtitle: (total, manual) => `${total} 个技能 · ${manual} 个只能点名`,
           stale: '刷新失败，显示的是上次结果',
           unmapped: '没收录进 taxonomy，先归到「其他」——欢迎去仓库提 PR 把它归位。',
+          auto: '自动归类',
           origin: '来源',
           registryOrigin: '运行时注册，没有文件',
           copyOrigin: '复制来源',
@@ -76,6 +78,7 @@ window.__ModuleLoader__.load({
           subtitle: (total, manual) => `${total} skills · ${manual} name-only`,
           stale: 'Refresh failed, showing the last result',
           unmapped: 'Not in taxonomy yet, shown under Other — a PR is welcome.',
+          auto: 'auto',
           origin: 'Origin',
           registryOrigin: 'Registered at runtime, no file',
           copyOrigin: 'Copy origin',
@@ -339,6 +342,25 @@ window.__ModuleLoader__.load({
       const [mode, setMode] = React.useState('all')
       const [feedback, setFeedback] = React.useState({ name: '', kind: '' })
       const [tick, setTick] = React.useState(0)
+      const [zh, setZh] = React.useState({})
+
+      React.useEffect(() => {
+        let alive = true
+        const controller = typeof AbortController === 'function' ? new AbortController() : null
+        const url = sessionId ? ZH_ROUTE + '?session=' + encodeURIComponent(sessionId) : ZH_ROUTE
+        fetch(url, controller ? { signal: controller.signal } : undefined)
+          .then((response) => response.json())
+          .then((payload) => {
+            if (alive && payload && payload.ok === true && payload.zh) setZh(payload.zh)
+          })
+          .catch(() => {
+            /* no translation: the cards keep the original description */
+          })
+        return () => {
+          alive = false
+          if (controller) controller.abort()
+        }
+      }, [sessionId])
 
       React.useEffect(() => {
         let alive = true
@@ -460,14 +482,17 @@ window.__ModuleLoader__.load({
         const origin = originFor(skill)
         const busy = feedback.name === skill.name
         const originBusy = feedback.name === skill.name + '#origin'
+        const translated = ZH ? zh[skill.name] || skill.zh || '' : ''
+        const description = translated || skill.description
         return h('div', { className: 'sd-card' + (manual ? ' is-manual' : ''), key: skill.name },
           h('div', { className: 'sd-card-top' },
             h('code', { className: 'sd-name' }, skill.name),
             h('div', { className: 'sd-badges' },
               manual ? h('span', { className: 'sd-badge is-manual' }, T.badgeManual) : h('span', { className: 'sd-badge' }, T.badgeAuto),
+              skill.situationSource === 'heuristic' ? h('span', { className: 'sd-badge' }, T.auto) : null,
             ),
           ),
-          skill.description ? h('p', { className: 'sd-desc' }, skill.description) : null,
+          description ? h('p', { className: 'sd-desc', title: translated ? skill.description : undefined }, description) : null,
           manual
             ? h('div', { className: 'sd-trigger' },
                 h('div', { className: 'sd-trigger-label' }, T.howto),
@@ -505,24 +530,6 @@ window.__ModuleLoader__.load({
           h('div', { className: 'sd-eyebrow' }, T.eyebrow),
           h('div', { className: 'sd-title' }, T.title),
           h('div', { className: 'sd-sub' }, T.subtitle(counts.total, counts.manual)),
-          h('div', { className: 'sd-stats' },
-            h('div', { className: 'sd-stat' },
-              h('div', { className: 'sd-stat-label' }, T.total),
-              h('div', { className: 'sd-stat-value' }, String(counts.total)),
-            ),
-            h('div', { className: 'sd-stat is-manual' },
-              h('div', { className: 'sd-stat-label' }, T.manual),
-              h('div', { className: 'sd-stat-value' }, String(counts.manual)),
-            ),
-            h('div', { className: 'sd-stat' },
-              h('div', { className: 'sd-stat-label' }, T.files),
-              h('div', { className: 'sd-stat-value' }, String(counts.files)),
-            ),
-            h('div', { className: 'sd-stat' },
-              h('div', { className: 'sd-stat-label' }, T.registry),
-              h('div', { className: 'sd-stat-value' }, String(counts.registry)),
-            ),
-          ),
         ),
 
         h('div', { className: 'sd-sticky' },

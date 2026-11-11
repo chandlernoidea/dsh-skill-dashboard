@@ -51,8 +51,9 @@ Grouping and trigger phrases live in [`taxonomy.json`](taxonomy.json) — plain 
 }
 ```
 
-- A skill that is not listed still appears, under **其他 / Other**.
+- A skill that is not listed still appears, sorted by an inference over its name and description (marked `auto`), or under **其他 / Other** when nothing matches.
 - `trigger` is optional; when absent the sentence is generated from the skill's own description.
+- `zh` is optional: the Chinese description shown instead of the English one.
 - `repo` is optional; it turns the origin line into a copyable repository URL.
 - `node tools/check-taxonomy.mjs` validates the file (CI runs it too).
 
