@@ -5,6 +5,10 @@
   "type": "module",
   "license": "MIT",
   "author": "chandlernoidea",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "engines": {
     "node": ">=20",
     "dsh": ">=0.2.2-rc.1"

@@ -278,27 +278,41 @@ step "在终端里盯一次：gh run watch"
 pause "看到 check 变绿后按 Enter"
 
 # ── 6 · npm 登录 ───────────────────────────────────────────────────────────
-stage "npm 登录"
-say "没有 npm 账号的话先注册一个（免费）。"
-open_url "https://www.npmjs.com/signup"
-step "在终端登录（会开浏览器）：npm login"
-if confirm "现在跑 npm login？"; then
-  npm login || warn "登录没有完成"
+stage "npm 登录（认准 npmjs.com）"
+npm_registry="https://registry.npmjs.org"
+current_registry=$(npm config get registry 2>/dev/null || echo "未知")
+step "当前默认 registry：$current_registry"
+if [[ "$current_registry" != *"registry.npmjs.org"* ]]; then
+  warn "你的 npm 指向的是镜像 —— 镜像只能装包，不能发布"
+  note "下面这条命令会显式指定 $npm_registry，不需要改你的全局配置"
 fi
-say "当前身份：$(npm whoami 2>/dev/null || echo '未登录')"
+open_url "https://www.npmjs.com/signup"
+say "没有账号先注册（免费），有账号直接登录。"
+step "命令：npm login --registry=$npm_registry"
+note "它打印一行 URL 并让你按 Enter；按了之后浏览器没开，就把那行 URL 复制到浏览器打开"
+if confirm "现在跑这条命令？"; then
+  npm login --registry="$npm_registry" || warn "登录没有完成"
+fi
+npm_user=$(npm whoami --registry="$npm_registry" 2>/dev/null || echo "未登录")
+say "npmjs 上的身份：$npm_user"
+if [[ "$npm_user" == "未登录" ]]; then
+  SKIPPED+=("npm 登录：npm login --registry=$npm_registry")
+fi
 
 # ── 7 · 发布到 npm ─────────────────────────────────────────────────────────
 stage "发布到 npm"
+npm_registry="https://registry.npmjs.org"
 say "包名 dsh-skill-dashboard（之前查过，没被占用）。"
+note "package.json 里的 publishConfig 已经把发布目标钉在 npmjs，不吃你的镜像配置"
 local_version=$(node -p "require('./package.json').version" 2>/dev/null || echo "未知")
-published=$(npm view dsh-skill-dashboard version 2>/dev/null || echo "还没有")
+published=$(npm view dsh-skill-dashboard version --registry="$npm_registry" 2>/dev/null || echo "还没有")
 step "本地版本：$local_version"
 step "线上版本：$published"
 note "线上已有同版本时，先改 package.json 的 version 再发"
 if confirm "现在执行 npm publish？"; then
-  npm publish || warn "发布失败（常见原因：版本号已存在、未登录）"
+  npm publish --registry="$npm_registry" || warn "发布失败（常见原因：版本号已存在、未登录）"
 fi
-say "线上版本现在是：$(npm view dsh-skill-dashboard version 2>/dev/null || echo '还没有')"
+say "线上版本现在是：$(npm view dsh-skill-dashboard version --registry="$npm_registry" 2>/dev/null || echo '还没有')"
 
 # ── 8 · 可选：上架插件市场 ─────────────────────────────────────────────────
 stage "可选：上架插件市场"
