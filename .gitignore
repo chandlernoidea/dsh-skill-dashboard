@@ -23,3 +23,8 @@ docs/research/
 
 # pack artifacts
 *.tgz
+
+# secrets — the publish wizard writes tokens into .env
+.env
+.env.*
+!.env.example
