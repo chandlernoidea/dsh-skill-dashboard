@@ -30,6 +30,8 @@ const DIAG_PATH = '/api/skill-dash/diagnose'
 const USAGE_PATH = '/api/skill-dash/usage'
 const CLASSIFY_PATH = '/api/skill-dash/classify'
 const EXCLUDE_PATH = '/api/skill-dash/exclude'
+const OVERRIDE_PATH = '/api/skill-dash/override'
+const OVERRIDE_IMPORT_PATH = '/api/skill-dash/override/import'
 const TAXONOMY_URL = new URL('./taxonomy.json', import.meta.url)
 
 const FALLBACK_TAXONOMY = {
@@ -144,6 +146,11 @@ function postJson(handler) {
  * the user already wrote keeps its place.
  */
 async function writeOverride(name, situation) {
+  return writeOverrides([name], situation)
+}
+
+/** Assign several skills in one read-modify-write, so a batch is atomic. */
+async function writeOverrides(names, situation) {
   const file = overrideFile()
   await mkdir(dirname(file), { recursive: true })
 
@@ -156,10 +163,22 @@ async function writeOverride(name, situation) {
   }
 
   const skills = data.skills !== null && typeof data.skills === 'object' && !Array.isArray(data.skills) ? data.skills : {}
-  const previous = skills[name] !== null && typeof skills[name] === 'object' && !Array.isArray(skills[name]) ? skills[name] : {}
-  skills[name] = { ...previous, situation }
+  for (const name of names) {
+    const previous = skills[name] !== null && typeof skills[name] === 'object' && !Array.isArray(skills[name]) ? skills[name] : {}
+    skills[name] = { ...previous, situation }
+  }
   data.skills = skills
 
+  const temporary = `${file}.tmp`
+  await writeFile(temporary, JSON.stringify(data, null, 2) + '\n', 'utf8')
+  await rename(temporary, file)
+  return file
+}
+
+/** Replace the whole override table (import). */
+async function writeRawOverride(data) {
+  const file = overrideFile()
+  await mkdir(dirname(file), { recursive: true })
   const temporary = `${file}.tmp`
   await writeFile(temporary, JSON.stringify(data, null, 2) + '\n', 'utf8')
   await rename(temporary, file)
@@ -683,9 +702,11 @@ export function apply(ctx) {
   // A resource route answers GET/HEAD only, so the write uses a Node handler
   // and reads its own body.
   const handleClassify = postJson(async (body) => {
-    const name = typeof body?.name === 'string' ? body.name.trim() : ''
+    const single = typeof body?.name === 'string' ? body.name.trim() : ''
+    const list = Array.isArray(body?.names) ? body.names.filter((entry) => typeof entry === 'string' && entry.trim() !== '').map((entry) => entry.trim()) : []
+    const names = list.length > 0 ? [...new Set(list)] : single === '' ? [] : [single]
     const situation = typeof body?.situation === 'string' ? body.situation.trim() : ''
-    if (name === '') return { status: 400, body: { ok: false, error: 'name is required' } }
+    if (names.length === 0) return { status: 400, body: { ok: false, error: 'name or names is required' } }
 
     const taxonomy = await loadTaxonomy()
     const situations = Array.isArray(taxonomy.situations) ? taxonomy.situations : []
@@ -693,8 +714,8 @@ export function apply(ctx) {
       return { status: 400, body: { ok: false, error: `unknown situation: ${situation}` } }
     }
 
-    const file = await writeOverride(name, situation)
-    return { body: { ok: true, name, situation, file } }
+    const file = await writeOverrides(names, situation)
+    return { body: { ok: true, names, situation, file } }
   })
 
   ctx.effect(() =>
@@ -717,6 +738,42 @@ export function apply(ctx) {
       kind: 'exact',
       path: EXCLUDE_PATH,
       handler: handleExclude,
+    }),
+  )
+
+  // The override table is the user's own data: export it, hand it to someone
+  // else, or paste theirs in.
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: OVERRIDE_PATH,
+      resource: async () => {
+        const override = await loadOverride()
+        return json({ ok: true, file: override.file, note: override.note, data: override.data })
+      },
+    }),
+  )
+
+  const handleImport = postJson(async (body) => {
+    const data = body?.data
+    if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+      return { status: 400, body: { ok: false, error: 'data must be an object' } }
+    }
+    if (data.skills !== undefined && (data.skills === null || typeof data.skills !== 'object' || Array.isArray(data.skills))) {
+      return { status: 400, body: { ok: false, error: 'data.skills must be an object' } }
+    }
+    if (data.exclude !== undefined && !Array.isArray(data.exclude)) {
+      return { status: 400, body: { ok: false, error: 'data.exclude must be an array' } }
+    }
+    const file = await writeRawOverride(data)
+    return { body: { ok: true, file, skills: Object.keys(data.skills ?? {}).length, exclude: (data.exclude ?? []).length } }
+  })
+
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: OVERRIDE_IMPORT_PATH,
+      handler: handleImport,
     }),
   )
 }

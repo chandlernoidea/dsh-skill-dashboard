@@ -1,6 +1,17 @@
 window.__ModuleLoader__.load({
   id: 'dsh-skill-dashboard',
   factory(require) {
+    // One file by necessity: the host serves this module as-is, with no bundler
+    // between the package and the browser. Sections, in order:
+    //   1. routes + constants
+    //   2. STRINGS_ZH / STRINGS_EN dictionaries
+    //   3. pure helpers (language, firstSentence, triggerFor, originFor)
+    //   4. installStyles — the whole `.sd-*` stylesheet, injected once
+    //   5. the tab-type registration (body + title + header button)
+    //   6. Dashboard: state, writers (classify / exclude / import), derived data
+    //   7. renderDiagnose — plugin health, usage table, override import/export
+    //   8. renderCard + the skills list
+    // Anything worth sharing with the host lives in lib/ instead.
     const React = require('react')
     const h = React.createElement
 
@@ -12,6 +23,8 @@ window.__ModuleLoader__.load({
     const USAGE_ROUTE = '/api/skill-dash/usage'
     const CLASSIFY_ROUTE = '/api/skill-dash/classify'
     const EXCLUDE_ROUTE = '/api/skill-dash/exclude'
+    const OVERRIDE_ROUTE = '/api/skill-dash/override'
+    const OVERRIDE_IMPORT_ROUTE = '/api/skill-dash/override/import'
     const FALLBACK_SITUATIONS = [{ id: 'other', title: '其他', order: 999 }]
 
     // ------------------------------------------------------------------ i18n
@@ -40,7 +53,7 @@ window.__ModuleLoader__.load({
           error: '读取失败',
           retry: '重试',
           manualBannerTitle: '这些技能默认不上架',
-          manualBannerBody: '只有你开口点名才会用到。点「需点名」只看它们，右边的触发语一键写进输入框。',
+          manualBannerBody: '这些技能不进模型目录，只有你在消息里写 /技能名 才会加载。点「需点名」只看它们，右边一键把 /名字 写进输入框。',
           subtitle: (total, manual) => `${total} 个技能 · ${manual} 个只能点名`,
           stale: '刷新失败，显示的是上次结果',
           unmapped: '没收录进 taxonomy，先归到「其他」——欢迎去仓库提 PR 把它归位。',
@@ -85,6 +98,18 @@ window.__ModuleLoader__.load({
           classify: '改归属',
           closeClassify: '取消',
           classifyFailed: '改归类失败：',
+          batchStart: '批量归类',
+          pickOne: '选中',
+          batchCancel: '退出批量',
+          batchPicked: (n) => `已选 ${n} 个，选一个处境应用`,
+          batchApplied: '已应用',
+          batchFailed: '批量归类失败：',
+          exportOverride: '导出归类表',
+          importOverride: '导入归类表',
+          importApply: '应用',
+          importCancel: '取消',
+          importFailed: '导入失败：',
+          exported: '已复制归类表 JSON',
           disabledList: '停用',
           excludeSkill: '不计入统计',
           includeSkill: '恢复统计',
@@ -128,7 +153,7 @@ window.__ModuleLoader__.load({
           error: 'Failed to load',
           retry: 'Retry',
           manualBannerTitle: 'These stay out of the model catalog',
-          manualBannerBody: 'They only run when you name them. Pick “Name-only”, then insert a trigger into the composer.',
+          manualBannerBody: 'They stay out of the model catalog. Type /name in a message to load one — the button on the right writes it into the composer.',
           subtitle: (total, manual) => `${total} skills · ${manual} name-only`,
           stale: 'Refresh failed, showing the last result',
           unmapped: 'Not in taxonomy yet, shown under Other — a PR is welcome.',
@@ -173,6 +198,18 @@ window.__ModuleLoader__.load({
           classify: 'Reclassify',
           closeClassify: 'Cancel',
           classifyFailed: 'Reclassify failed: ',
+          batchStart: 'Batch classify',
+          pickOne: 'Select',
+          batchCancel: 'Exit batch',
+          batchPicked: (n) => `${n} selected — pick a situation`,
+          batchApplied: 'Applied',
+          batchFailed: 'Batch classify failed: ',
+          exportOverride: 'Export table',
+          importOverride: 'Import table',
+          importApply: 'Apply',
+          importCancel: 'Cancel',
+          importFailed: 'Import failed: ',
+          exported: 'Table JSON copied',
           disabledList: 'Disabled',
           excludeSkill: 'Skip in stats',
           includeSkill: 'Count again',
@@ -213,6 +250,9 @@ window.__ModuleLoader__.load({
     }
 
     function triggerFor(skill, language) {
+      // A model-disabled skill can only be reached by a `/name` token in the
+      // user's message, so that is the only trigger worth copying.
+      if (skill.modelInvocable === false) return `/${skill.name}`
       if (skill.trigger) return skill.trigger
       const desc = firstSentence(skill.whenToUse || skill.description)
       const isZh = /^zh/i.test(language || '')
@@ -506,6 +546,18 @@ window.__ModuleLoader__.load({
   border-radius: 8px; padding: 6px 9px;
   color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1.5;
 }
+.sd-batch { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+.sd-btn-sm.is-on { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
+.sd-pick { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.sd-pick input { accent-color: var(--dsw-alias-brand-primary); }
+.sd-card.is-picked { border-color: var(--dsw-alias-brand-primary); }
+.sd-import { display: flex; flex-direction: column; gap: 6px; }
+.sd-import-text {
+  width: 100%; box-sizing: border-box; font-family: var(--ds-font-family-code, ui-monospace, monospace);
+  font-size: 10px; line-height: 1.5; padding: 6px; border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary); resize: vertical;
+}
 .sd-card-foot { display: flex; justify-content: flex-end; margin-top: 1px; }
 .sd-classify-toggle {
   border: 0; background: transparent; color: var(--dsw-alias-label-secondary);
@@ -605,6 +657,12 @@ window.__ModuleLoader__.load({
       const [classifyBusy, setClassifyBusy] = React.useState(false)
       const [classifyError, setClassifyError] = React.useState('')
       const [excludeError, setExcludeError] = React.useState('')
+      const [batchMode, setBatchMode] = React.useState(false)
+      const [picked, setPicked] = React.useState([])
+      const [importOpen, setImportOpen] = React.useState(false)
+      const [importText, setImportText] = React.useState('')
+      const [importError, setImportError] = React.useState('')
+      const [overrideNotice, setOverrideNotice] = React.useState('')
       const [tick, setTick] = React.useState(0)
       const [zh, setZh] = React.useState({})
 
@@ -743,6 +801,73 @@ window.__ModuleLoader__.load({
           }
         } catch (error) {
           setExcludeError(String((error && error.message) || error))
+        }
+      }
+
+      const togglePick = (name) => {
+        setPicked((current) => (current.includes(name) ? current.filter((entry) => entry !== name) : [...current, name]))
+      }
+
+      const applyBatch = async (situationId) => {
+        if (picked.length === 0) return
+        setClassifyError('')
+        try {
+          const response = await fetch(CLASSIFY_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ names: picked, situation: situationId }),
+          })
+          const payload = await response.json()
+          if (payload && payload.ok) {
+            setPicked([])
+            setBatchMode(false)
+            setTick((value) => value + 1)
+          } else {
+            setClassifyError(String((payload && payload.error) || 'failed'))
+          }
+        } catch (error) {
+          setClassifyError(String((error && error.message) || error))
+        }
+      }
+
+      const exportOverride = async () => {
+        setOverrideNotice('')
+        try {
+          const response = await fetch(OVERRIDE_ROUTE)
+          const payload = await response.json()
+          const text = JSON.stringify(payload?.data ?? {}, null, 2)
+          await copyText(text)
+          setOverrideNotice(T.exported)
+        } catch (error) {
+          setImportError(String((error && error.message) || error))
+        }
+      }
+
+      const importOverride = async () => {
+        setImportError('')
+        let parsed
+        try {
+          parsed = JSON.parse(importText)
+        } catch (error) {
+          setImportError(T.importFailed + 'JSON 解析失败')
+          return
+        }
+        try {
+          const response = await fetch(OVERRIDE_IMPORT_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ data: parsed }),
+          })
+          const payload = await response.json()
+          if (payload && payload.ok) {
+            setImportOpen(false)
+            setImportText('')
+            setTick((value) => value + 1)
+          } else {
+            setImportError(T.importFailed + String((payload && payload.error) || 'failed'))
+          }
+        } catch (error) {
+          setImportError(T.importFailed + String((error && error.message) || error))
         }
       }
 
@@ -945,6 +1070,35 @@ window.__ModuleLoader__.load({
               )
             : null,
 
+          h('div', { className: 'sd-status-row' },
+            h('button', { type: 'button', className: 'sd-btn-sm', onClick: exportOverride }, T.exportOverride),
+            h('button', {
+              type: 'button',
+              className: 'sd-btn-sm',
+              onClick: () => {
+                setImportOpen((value) => !value)
+                setImportError('')
+              },
+            }, importOpen ? T.importCancel : T.importOverride),
+            overrideNotice ? h('span', { className: 'sd-status-note' }, overrideNotice) : null,
+          ),
+
+          importOpen
+            ? h('div', { className: 'sd-import' },
+                h('textarea', {
+                  className: 'sd-import-text',
+                  rows: 6,
+                  placeholder: '{ "skills": { "my-skill": { "situation": "code" } }, "exclude": ["noisy"] }',
+                  value: importText,
+                  onChange: (event) => setImportText(event.target.value),
+                }),
+                h('div', { className: 'sd-status-row' },
+                  h('button', { type: 'button', className: 'sd-btn-sm', onClick: importOverride }, T.importApply),
+                  importError ? h('span', { className: 'sd-status-err' }, importError) : null,
+                ),
+              )
+            : null,
+
           h('div', { className: 'sd-section-title' }, T.usageTitle),
           h('div', { className: 'sd-status-row' },
             h('span', { className: 'sd-pill' }, usageScope === 'all' ? T.allSessions : T.sessionLabel, ' ', usageText),
@@ -1064,7 +1218,17 @@ window.__ModuleLoader__.load({
         const originBusy = feedback.name === skill.name + '#origin'
         const translated = isZh ? zh[skill.name] || skill.zh || '' : ''
         const description = translated || skill.description
-        return h('div', { className: 'sd-card' + (manual ? ' is-manual' : ''), key: skill.name },
+        return h('div', { className: 'sd-card' + (manual ? ' is-manual' : '') + (picked.includes(skill.name) ? ' is-picked' : ''), key: skill.name },
+          batchMode
+            ? h('label', { className: 'sd-pick' },
+                h('input', {
+                  type: 'checkbox',
+                  checked: picked.includes(skill.name),
+                  onChange: () => togglePick(skill.name),
+                }),
+                h('span', null, T.pickOne),
+              )
+            : null,
           h('div', { className: 'sd-card-top' },
             h('code', { className: 'sd-name' }, skill.name),
             h('div', { className: 'sd-badges' },
@@ -1149,6 +1313,31 @@ window.__ModuleLoader__.load({
           h('div', { className: 'sd-title' }, T.title),
           h('div', { className: 'sd-sub' }, T.subtitle(counts.total, counts.manual)),
           switchNode,
+        ),
+
+        h('div', { className: 'sd-batch' },
+          h('button', {
+            type: 'button',
+            className: 'sd-btn-sm' + (batchMode ? ' is-on' : ''),
+            onClick: () => {
+              setBatchMode((value) => !value)
+              setPicked([])
+            },
+          }, batchMode ? T.batchCancel : T.batchStart),
+          batchMode ? h('span', { className: 'sd-status-note' }, T.batchPicked(picked.length)) : null,
+          batchMode && picked.length > 0
+            ? h('div', { className: 'sd-classify' },
+                data.situations.map((situation) =>
+                  h('button', {
+                    key: situation.id,
+                    type: 'button',
+                    className: 'sd-chip',
+                    onClick: () => applyBatch(situation.id),
+                  }, situation.title),
+                ),
+                classifyError ? h('div', { className: 'sd-classify-error' }, T.batchFailed + classifyError) : null,
+              )
+            : null,
         ),
 
         h('div', { className: 'sd-sticky' },
