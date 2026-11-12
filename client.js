@@ -117,6 +117,11 @@ window.__ModuleLoader__.load({
           namedHint: '「点名」= 这次调用前，最近一条用户消息里出现了技能名（推断，非记录）',
           excludedLine: (n) => `已排除统计 ${n} 个，点名字恢复：`,
           excludedFailed: '改排除失败：',
+          auditTitle: '触发体检',
+          auditBody: (n) => `${n} 个可调技能的描述里没有「什么时候用」，模型匹配不上，等于隐形。`,
+          auditGood: '所有可调技能的描述都写了使用条件。',
+          copyRule: '复制「技能优先」指令',
+          ruleCopied: '已复制指令块',
           partialScan: (done, total) => `只扫了 ${done}/${total} 个会话（超时）`,
           sessionLabel: '本会话',
           sessionUsage: (skills, calls) => `用过 ${skills} 个技能 · ${calls} 次调用`,
@@ -217,6 +222,11 @@ window.__ModuleLoader__.load({
           namedHint: '"Named" means the turn\'s user message mentioned the skill before the call — a heuristic, not a recorded fact.',
           excludedLine: (n) => `${n} excluded from stats — click a name to restore: `,
           excludedFailed: 'Exclude failed: ',
+          auditTitle: 'Trigger audit',
+          auditBody: (n) => `${n} invocable skills never say when to use them — the model cannot match them.`,
+          auditGood: 'Every invocable skill states its usage condition.',
+          copyRule: 'Copy the "skills first" rule',
+          ruleCopied: 'Rule copied',
           partialScan: (done, total) => `scanned ${done}/${total} sessions (timed out)`,
           sessionLabel: 'This session',
           sessionUsage: (skills, calls) => `${skills} skills · ${calls} calls`,
@@ -999,6 +1009,24 @@ window.__ModuleLoader__.load({
         group.names.push(skill.name)
       }
 
+      // A description that never says when to use it cannot win a match.
+      const WHEN_MARKERS = /(use when|when the user|use for|use before|when working|用于|适合|当.{0,6}时|时使用)/i
+      const vagueSkills = skills.filter((skill) => {
+        if (skill.modelInvocable === false) return false
+        const text = (skill.description || "") + " " + (skill.whenToUse || "")
+        return !WHEN_MARKERS.test(text)
+      })
+
+      const RULE_SNIPPET = [
+        "## 技能优先",
+        "",
+        "开工前先看会话里的技能目录：只要某个技能的名字或描述命中当前任务，先用 `skill` 工具加载它，再动手。",
+        "",
+        "- 命中就加载，不要凭印象模仿它的做法。",
+        "- 手动型技能不在目录里，只有用户写 `/名字` 时才加载，不要尝试替用户调用。",
+        "- 加载后按它的流程走；与仓库约定冲突时以仓库约定为准，并说明冲突在哪。",
+      ].join("\n")
+
       const renderDiagnose = () => {
         const health = pluginHealth
         return h('div', { className: 'sd-page' },
@@ -1099,7 +1127,25 @@ window.__ModuleLoader__.load({
               )
             : null,
 
-          h('div', { className: 'sd-section-title' }, T.usageTitle),
+          h("div", { className: "sd-section-title" }, T.auditTitle),
+          vagueSkills.length === 0
+            ? h("div", { className: "sd-diag-meta" }, T.auditGood)
+            : h("div", { className: "sd-diag-meta" }, T.auditBody(vagueSkills.length)),
+          vagueSkills.length > 0
+            ? h("div", { className: "sd-unused-names" }, vagueSkills.map((skill) => skill.name).join("、"))
+            : null,
+          h("div", { className: "sd-status-row" },
+            h("button", {
+              type: "button",
+              className: "sd-btn-sm",
+              onClick: async () => {
+                await copyText(RULE_SNIPPET)
+                setOverrideNotice(T.ruleCopied)
+              },
+            }, overrideNotice === T.ruleCopied ? T.ruleCopied : T.copyRule),
+          ),
+
+          h("div", { className: "sd-section-title" }, T.usageTitle),
           h('div', { className: 'sd-status-row' },
             h('span', { className: 'sd-pill' }, usageScope === 'all' ? T.allSessions : T.sessionLabel, ' ', usageText),
             h('button', {
