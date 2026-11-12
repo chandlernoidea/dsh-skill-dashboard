@@ -8,6 +8,8 @@ window.__ModuleLoader__.load({
     const TAB_KIND = 'skill-dashboard'
     const ROUTE = '/api/skill-dash/data'
     const ZH_ROUTE = '/api/skill-dash/zh'
+    const DIAG_ROUTE = '/api/skill-dash/diagnose'
+    const USAGE_ROUTE = '/api/skill-dash/usage'
     const FALLBACK_SITUATIONS = [{ id: 'other', title: '其他', order: 999 }]
 
     // ------------------------------------------------------------------ i18n
@@ -55,6 +57,18 @@ window.__ModuleLoader__.load({
           diagCollapse: '收起',
           diagEmpty: '没有诊断文本',
           diagMore: (n) => `另有 ${n} 个`,
+          diagnose: '开始诊断',
+          rediagnose: '重新诊断',
+          diagnosing: '诊断中…',
+          copyReport: '复制报告',
+          diagFailed: '诊断失败',
+          scanning: '扫描中…',
+          scopeAll: '统计全部会话',
+          scopeSession: '只看本会话',
+          unusedSession: '本会话未调用',
+          unusedAll: '历史未调用',
+          allSessions: '全部会话',
+          partialScan: (done, total) => `只扫了 ${done}/${total} 个会话（超时）`,
           sessionLabel: '本会话',
           sessionUsage: (skills, calls) => `用过 ${skills} 个技能 · ${calls} 次调用`,
           sessionFailed: (n) => `（${n} 次失败）`,
@@ -109,6 +123,18 @@ window.__ModuleLoader__.load({
           diagCollapse: 'Hide',
           diagEmpty: 'No diagnostic text',
           diagMore: (n) => `${n} more`,
+          diagnose: 'Run diagnostics',
+          rediagnose: 'Run again',
+          diagnosing: 'Running…',
+          copyReport: 'Copy report',
+          diagFailed: 'Diagnostics failed',
+          scanning: 'Scanning…',
+          scopeAll: 'All sessions',
+          scopeSession: 'This session',
+          unusedSession: 'unused in this session',
+          unusedAll: 'never called',
+          allSessions: 'All sessions',
+          partialScan: (done, total) => `scanned ${done}/${total} sessions (timed out)`,
           sessionLabel: 'This session',
           sessionUsage: (skills, calls) => `${skills} skills · ${calls} calls`,
           sessionFailed: (n) => ` (${n} failed)`,
@@ -198,6 +224,27 @@ window.__ModuleLoader__.load({
 .sd-stat-value { font-size: 17px; font-weight: 680; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .sd-stat.is-manual { border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 42%, var(--dsw-alias-border-l2)); }
 .sd-stat.is-manual .sd-stat-value { color: var(--dsw-alias-state-warn-primary); }
+.sd-status { display: flex; flex-direction: column; gap: 7px; margin-top: 9px; }
+.sd-status-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sd-btn-sm {
+  border: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary); border-radius: 7px;
+  padding: 2px 9px; font: inherit; font-size: 10.5px; line-height: 1.7; cursor: pointer;
+}
+.sd-btn-sm:hover:enabled { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-brand-primary); }
+.sd-btn-sm:disabled { opacity: .55; cursor: default; }
+.sd-status-err { color: var(--dsw-alias-state-error-primary); font-size: 10px; }
+.sd-status-note { color: var(--dsw-alias-label-secondary); font-size: 10px; }
+.sd-bars { display: flex; flex-direction: column; gap: 3px; }
+.sd-bar-row { display: grid; grid-template-columns: minmax(64px, 38%) 1fr auto; align-items: center; gap: 6px; }
+.sd-bar-name {
+  font-family: var(--ds-font-family-code, ui-monospace, monospace);
+  font-size: 10px; color: var(--dsw-alias-label-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sd-bar-track { height: 5px; border-radius: 999px; background: var(--dsw-alias-bg-layer-2); overflow: hidden; }
+.sd-bar-fill { display: block; height: 100%; border-radius: 999px; background: var(--dsw-alias-brand-primary); opacity: .75; }
+.sd-bar-count { font-size: 10px; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
 .sd-health { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .sd-pill {
   border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px;
@@ -452,6 +499,11 @@ window.__ModuleLoader__.load({
       const [mode, setMode] = React.useState('all')
       const [feedback, setFeedback] = React.useState({ name: '', kind: '' })
       const [diagOpen, setDiagOpen] = React.useState(false)
+      const [diag, setDiag] = React.useState({ status: 'idle', data: null, error: '' })
+      const [usageScope, setUsageScope] = React.useState('session')
+      const [usageAll, setUsageAll] = React.useState(null)
+      const [usageLoading, setUsageLoading] = React.useState(false)
+      const [reportCopied, setReportCopied] = React.useState(false)
       const [tick, setTick] = React.useState(0)
       const [zh, setZh] = React.useState({})
 
@@ -581,18 +633,65 @@ window.__ModuleLoader__.load({
       }
 
       const isZh = /^zh/i.test(language || '')
-      const pluginHealth = data.plugins
-      const usageBySkill = (data.usage && data.usage.byName) || {}
+      const activeUsage = usageScope === 'all' && usageAll !== null ? usageAll : data.usage
+      const usageBySkill = (activeUsage && activeUsage.byName) || {}
       const usedSkills = Object.keys(usageBySkill).length
-      const usedCalls = (data.usage && data.usage.total) || 0
-      const failedCalls = (data.usage && data.usage.failed) || 0
-      const usageText = !data.usage
+      const usedCalls = (activeUsage && activeUsage.total) || 0
+      const failedCalls = (activeUsage && activeUsage.failed) || 0
+      const usageText = !activeUsage
         ? ''
         : usedSkills === 0 && usedCalls === 0
           ? failedCalls > 0
             ? T.sessionOnlyFailed(failedCalls)
             : T.sessionEmpty
           : T.sessionUsage(usedSkills, usedCalls) + (failedCalls > 0 ? T.sessionFailed(failedCalls) : '')
+      const topSkills = Object.entries(usageBySkill)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+      const topMax = topSkills.length > 0 ? topSkills[0][1] : 1
+      const unusedCount = Math.max(0, skills.length - usedSkills)
+      const pluginHealth = diag.data && diag.data.plugins ? diag.data.plugins : null
+
+      const runDiagnose = async () => {
+        setDiag((prev) => ({ status: 'loading', data: prev.data, error: '' }))
+        try {
+          const params = new URLSearchParams()
+          if (sessionId) params.set('session', sessionId)
+          if (language) params.set('lang', language)
+          const url = DIAG_ROUTE + (params.toString() ? '?' + params.toString() : '')
+          const payload = await (await fetch(url)).json()
+          if (payload && payload.ok) setDiag({ status: 'ready', data: payload, error: '' })
+          else setDiag({ status: 'error', data: null, error: String((payload && payload.error) || T.diagFailed) })
+        } catch (error) {
+          setDiag({ status: 'error', data: null, error: String((error && error.message) || error) })
+        }
+      }
+
+      const copyReport = async () => {
+        if (!diag.data || !diag.data.text) return
+        await copyText(diag.data.text)
+        setReportCopied(true)
+        setTimeout(() => setReportCopied(false), 1600)
+      }
+
+      const toggleScope = async () => {
+        if (usageScope === 'all') {
+          setUsageScope('session')
+          return
+        }
+        setUsageScope('all')
+        if (usageAll !== null) return
+        setUsageLoading(true)
+        try {
+          const params = new URLSearchParams({ scope: 'all' })
+          if (sessionId) params.set('session', sessionId)
+          const payload = await (await fetch(USAGE_ROUTE + '?' + params.toString())).json()
+          setUsageAll(payload && payload.ok ? payload : null)
+        } catch (error) {
+          setUsageAll(null)
+        }
+        setUsageLoading(false)
+      }
       const missingCatalog = ((data.capabilities && data.capabilities.missing) || [])        .filter((capability) => capability.role === 'catalog')
         .map((capability) => (isZh ? capability.label : capability.labelEn))
         .join(' / ')
@@ -684,58 +783,100 @@ window.__ModuleLoader__.load({
           h('div', { className: 'sd-sub' }, T.subtitle(counts.total, counts.manual)),
         ),
 
-        pluginHealth || data.usage
-          ? h('div', { className: 'sd-health' },
-              pluginHealth
-                ? h('span', { className: 'sd-pill' },
-                    T.plugins, ' ', h('b', null, String(pluginHealth.total)), ' · ',
-                    h('b', null, String(pluginHealth.active)), ' ', T.pluginActive,
-                    pluginHealth.failed > 0
-                      ? h('span', { className: 'sd-pill-bad' }, ' · ', String(pluginHealth.failed), ' ', T.pluginFailed)
-                      : null,
-                    pluginHealth.disabled > 0
-                      ? h('span', { className: 'sd-pill-muted' }, ' · ', String(pluginHealth.disabled), ' ', T.pluginDisabled)
-                      : null,
-                  )
-                : null,
-              data.usage
-                ? h('span', { className: 'sd-pill' }, T.sessionLabel, ' ', usageText)
-                : null,
-            )
-          : null,
+        h('div', { className: 'sd-status' },
+          h('div', { className: 'sd-status-row' },
+            h('button', {
+              type: 'button',
+              className: 'sd-btn-sm',
+              disabled: diag.status === 'loading',
+              onClick: runDiagnose,
+            }, diag.status === 'loading' ? T.diagnosing : diag.data ? T.rediagnose : T.diagnose),
+            diag.data
+              ? h('button', { type: 'button', className: 'sd-btn-sm', onClick: copyReport }, reportCopied ? T.copied : T.copyReport)
+              : null,
+            diag.status === 'error' ? h('span', { className: 'sd-status-err' }, diag.error) : null,
+          ),
 
-        pluginHealth && pluginHealth.failed > 0
-          ? h('div', { className: 'sd-diag' },
-              h('button', {
-                type: 'button',
-                className: 'sd-diag-head',
-                'aria-expanded': diagOpen ? 'true' : 'false',
-                onClick: () => setDiagOpen((value) => !value),
-              },
-                h('span', { className: 'sd-diag-warn' }, '⚠ ', T.failedList, ' ', String(pluginHealth.failed)),
-                h('span', { className: 'sd-diag-toggle' }, diagOpen ? T.diagCollapse : T.diagExpand),
-              ),
-              diagOpen
-                ? h('div', { className: 'sd-diag-body' },
-                    pluginHealth.failedNames.map((plugin) =>
-                      h('div', { className: 'sd-diag-item', key: plugin.moduleName || plugin.name },
-                        h('div', { className: 'sd-diag-name' },
-                          plugin.name,
-                          plugin.phase ? h('span', { className: 'sd-diag-phase' }, plugin.phase) : null,
+          pluginHealth
+            ? h('div', { className: 'sd-health' },
+                h('span', { className: 'sd-pill' },
+                  T.plugins, ' ', h('b', null, String(pluginHealth.total)), ' · ',
+                  h('b', null, String(pluginHealth.active)), ' ', T.pluginActive,
+                  pluginHealth.failed > 0
+                    ? h('span', { className: 'sd-pill-bad' }, ' · ', String(pluginHealth.failed), ' ', T.pluginFailed)
+                    : null,
+                  pluginHealth.disabled > 0
+                    ? h('span', { className: 'sd-pill-muted' }, ' · ', String(pluginHealth.disabled), ' ', T.pluginDisabled)
+                    : null,
+                ),
+              )
+            : null,
+
+          pluginHealth && pluginHealth.failed > 0
+            ? h('div', { className: 'sd-diag' },
+                h('button', {
+                  type: 'button',
+                  className: 'sd-diag-head',
+                  'aria-expanded': diagOpen ? 'true' : 'false',
+                  onClick: () => setDiagOpen((value) => !value),
+                },
+                  h('span', { className: 'sd-diag-warn' }, '⚠ ', T.failedList, ' ', String(pluginHealth.failed)),
+                  h('span', { className: 'sd-diag-toggle' }, diagOpen ? T.diagCollapse : T.diagExpand),
+                ),
+                diagOpen
+                  ? h('div', { className: 'sd-diag-body' },
+                      pluginHealth.failedNames.map((plugin) =>
+                        h('div', { className: 'sd-diag-item', key: plugin.moduleName || plugin.name },
+                          h('div', { className: 'sd-diag-name' },
+                            plugin.name,
+                            plugin.phase ? h('span', { className: 'sd-diag-phase' }, plugin.phase) : null,
+                          ),
+                          plugin.moduleName && plugin.moduleName !== plugin.name
+                            ? h('div', { className: 'sd-diag-module' }, plugin.moduleName)
+                            : null,
+                          h('div', { className: 'sd-diag-text' }, plugin.diagnostic || T.diagEmpty),
                         ),
-                        plugin.moduleName && plugin.moduleName !== plugin.name
-                          ? h('div', { className: 'sd-diag-module' }, plugin.moduleName)
-                          : null,
-                        h('div', { className: 'sd-diag-text' }, plugin.diagnostic || T.diagEmpty),
                       ),
+                      pluginHealth.failed > pluginHealth.failedNames.length
+                        ? h('div', { className: 'sd-diag-more' }, T.diagMore(pluginHealth.failed - pluginHealth.failedNames.length))
+                        : null,
+                    )
+                  : null,
+              )
+            : null,
+
+          h('div', { className: 'sd-status-row' },
+            h('span', { className: 'sd-pill' },
+              usageScope === 'all' ? T.allSessions : T.sessionLabel, ' ', usageText),
+            h('button', {
+              type: 'button',
+              className: 'sd-btn-sm',
+              disabled: usageLoading,
+              onClick: toggleScope,
+            }, usageLoading ? T.scanning : usageScope === 'all' ? T.scopeSession : T.scopeAll),
+          ),
+
+          topSkills.length > 0
+            ? h('div', { className: 'sd-bars' },
+                topSkills.map(([name, count]) =>
+                  h('div', { className: 'sd-bar-row', key: name },
+                    h('span', { className: 'sd-bar-name', title: name }, name),
+                    h('span', { className: 'sd-bar-track' },
+                      h('span', { className: 'sd-bar-fill', style: { width: Math.max(6, Math.round((count / topMax) * 100)) + '%' } }),
                     ),
-                    pluginHealth.failed > pluginHealth.failedNames.length
-                      ? h('div', { className: 'sd-diag-more' }, T.diagMore(pluginHealth.failed - pluginHealth.failedNames.length))
-                      : null,
-                  )
-                : null,
-            )
-          : null,
+                    h('span', { className: 'sd-bar-count' }, String(count)),
+                  ),
+                ),
+              )
+            : null,
+
+          h('div', { className: 'sd-status-note' },
+            (usageScope === 'all' ? T.unusedAll : T.unusedSession) + ' ' + String(unusedCount),
+            usageScope === 'all' && usageAll && usageAll.partial
+              ? ' · ' + T.partialScan(usageAll.sessions, usageAll.available)
+              : null,
+          ),
+        ),
 
         h('div', { className: 'sd-sticky' },
           h('div', { className: 'sd-search-row' },

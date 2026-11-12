@@ -26,6 +26,8 @@ export const inject = ['webServer']
 
 const ROUTE_PATH = '/api/skill-dash/data'
 const ZH_PATH = '/api/skill-dash/zh'
+const DIAG_PATH = '/api/skill-dash/diagnose'
+const USAGE_PATH = '/api/skill-dash/usage'
 const TAXONOMY_URL = new URL('./taxonomy.json', import.meta.url)
 
 const FALLBACK_TAXONOMY = {
@@ -167,6 +169,49 @@ function readUsage(ctx, sessionId) {
   }
 }
 
+function reportOf({ plugins, capabilities, taxonomy, counts, language }) {
+  const zh = String(language || '').toLowerCase().startsWith('zh')
+  const lines = []
+  lines.push(zh ? 'DSH 技能上手台 · 诊断报告' : 'DSH skill dashboard — diagnostics')
+  lines.push(zh ? `时间：${new Date().toISOString()}` : `Time: ${new Date().toISOString()}`)
+  lines.push('')
+  if (plugins) {
+    lines.push(
+      zh
+        ? `插件：${plugins.total} 行 / ${plugins.active} 活跃 / ${plugins.failed} 失败 / ${plugins.disabled} 停用`
+        : `Plugins: ${plugins.total} rows / ${plugins.active} active / ${plugins.failed} failed / ${plugins.disabled} disabled`,
+    )
+    if (plugins.failed > 0) {
+      lines.push(zh ? '失败插件：' : 'Failed:')
+      for (const plugin of plugins.failedNames) {
+        lines.push(`  - ${plugin.name} (${plugin.moduleName || '?'}, ${plugin.phase || '?'})`)
+        if (plugin.diagnostic) lines.push(`    ${plugin.diagnostic.replace(/\n/g, '\n    ')}`)
+      }
+    }
+  } else {
+    lines.push(zh ? '插件：拿不到列表（pluginManager 不可用）' : 'Plugins: unavailable (no pluginManager)')
+  }
+  if (capabilities) {
+    const missing = capabilities.missing.map((cap) => (zh ? cap.label : cap.labelEn))
+    lines.push(zh ? `宿主能力：${missing.length === 0 ? '齐全' : '缺 ' + missing.join('、')}` : `Capabilities: ${missing.length === 0 ? 'all present' : 'missing ' + missing.join(', ')}`)
+  }
+  if (counts) {
+    lines.push(
+      zh
+        ? `技能：${counts.total} 个（需点名 ${counts.manual}，有文件 ${counts.files}，注册表 ${counts.registry}，未收录 ${counts.unmapped}）`
+        : `Skills: ${counts.total} (manual-only ${counts.manual}, on disk ${counts.files}, registry ${counts.registry}, unmapped ${counts.unmapped})`,
+    )
+  }
+  if (taxonomy) {
+    lines.push(
+      zh
+        ? `归类表：v${taxonomy.version}，${taxonomy.situations} 个处境，${taxonomy.skills} 条映射`
+        : `Taxonomy: v${taxonomy.version}, ${taxonomy.situations} situations, ${taxonomy.skills} mappings`,
+    )
+  }
+  return lines.join('\n')
+}
+
 export function apply(ctx) {
   const server = ctx.get('webServer')
   if (server === undefined) {
@@ -252,7 +297,6 @@ export function apply(ctx) {
     const taxonomy = await loadTaxonomy()
     const override = await loadOverride()
     const sessionId = url.searchParams.get('session') || currentSessionId()
-    const plugins = await readPlugins(ctx)
     const usage = readUsage(ctx, sessionId)
 
     if (result.items === null) {
@@ -268,7 +312,6 @@ export function apply(ctx) {
         overrideFile: override.file,
         overrideNote: override.note,
         capabilities,
-        plugins,
         usage,
         problem: { code: 'no-catalog' },
         ...composed,
@@ -286,7 +329,6 @@ export function apply(ctx) {
       overrideFile: override.file,
       overrideNote: override.note,
       capabilities,
-      plugins,
       usage,
       ...composed,
     })
@@ -376,6 +418,122 @@ export function apply(ctx) {
       kind: 'exact',
       path: ZH_PATH,
       resource: async (request) => handleZh(request),
+    }),
+  )
+
+  // Diagnostics are user-triggered: reading every plugin row and the whole
+  // catalog is cheap but pointless on every panel open.
+  const handleDiagnose = async (request) => {
+    const url = new URL(request.url)
+    const signal = request?.signal
+    const language = url.searchParams.get('lang') || ''
+    const plugins = await readPlugins(ctx)
+    const taxonomy = await loadTaxonomy()
+    const override = await loadOverride()
+    const capabilities = summarizeAvailability({
+      sessionSkillCatalog: ctx.get('sessionSkillCatalog') !== undefined,
+      skills: ctx.get('skills') !== undefined,
+      sessions: ctx.get('sessions') !== undefined,
+      translator: ctx.get('translator') !== undefined,
+    })
+
+    let counts = null
+    try {
+      const catalog = await readCatalog(url, signal)
+      if (catalog.items !== null) {
+        counts = composeDashboard({ skills: catalog.items, taxonomy, override: override.data, language }).counts
+      }
+    } catch (error) {
+      counts = null
+    }
+
+    const taxonomyInfo = {
+      version: taxonomy.version ?? 0,
+      situations: Array.isArray(taxonomy.situations) ? taxonomy.situations.length : 0,
+      skills: taxonomy.skills !== null && typeof taxonomy.skills === 'object' ? Object.keys(taxonomy.skills).length : 0,
+    }
+
+    return json({
+      ok: true,
+      generatedAt: Date.now(),
+      plugins,
+      capabilities,
+      taxonomy: taxonomyInfo,
+      counts,
+      text: reportOf({ plugins, capabilities, taxonomy: taxonomyInfo, counts, language }),
+    })
+  }
+
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: DIAG_PATH,
+      resource: async (request) => handleDiagnose(request),
+    }),
+  )
+
+  const readUsageAll = async (signal) => {
+    const query = ctx.get('sessionQuery')
+    if (query === undefined || typeof query.listSessions !== 'function') {
+      return { scope: 'all', error: 'sessionQuery unavailable', sessions: 0, available: 0, total: 0, byName: {}, partial: false }
+    }
+
+    const records = await query.listSessions(signal)
+    const list = Array.isArray(records) ? records.slice(0, 30) : []
+    const byName = {}
+    let total = 0
+    let scanned = 0
+    const deadline = Date.now() + 8000
+
+    for (const record of list) {
+      if (Date.now() > deadline) break
+      const id = record?.header?.id
+      if (typeof id !== 'string' || id === '') continue
+      try {
+        let events = null
+        const live = ctx.get('sessions')?.get?.(id)
+        if (live !== undefined && typeof live.snapshotEvents === 'function') {
+          events = live.snapshotEvents()
+        } else if (typeof query.readSession === 'function') {
+          events = (await query.readSession(id))?.events ?? null
+        }
+        if (!events) continue
+        const tally = tallySkillUsage(events)
+        total += tally.total
+        for (const [name, count] of Object.entries(tally.byName)) byName[name] = (byName[name] ?? 0) + count
+        scanned += 1
+      } catch (error) {
+        // One unreadable session must not abort the scan.
+      }
+    }
+
+    return { scope: 'all', sessions: scanned, available: list.length, total, byName, partial: scanned < list.length }
+  }
+
+  const handleUsage = async (request) => {
+    const url = new URL(request.url)
+    const signal = request?.signal
+    const scope = url.searchParams.get('scope') || 'session'
+    const sessionId = url.searchParams.get('session') || currentSessionId()
+
+    if (scope !== 'all') {
+      const usage = readUsage(ctx, sessionId)
+      return json({ ok: usage !== null, ...(usage ?? {}) })
+    }
+
+    try {
+      const aggregated = await readUsageAll(signal)
+      return json({ ok: true, ...aggregated })
+    } catch (error) {
+      return json({ ok: false, error: String(error?.message ?? error) }, 500)
+    }
+  }
+
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: USAGE_PATH,
+      resource: async (request) => handleUsage(request),
     }),
   )
 }
