@@ -114,12 +114,18 @@ window.__ModuleLoader__.load({
           excludeSkill: '不计入统计',
           includeSkill: '恢复统计',
           namedCol: '点名',
+          usageModel: '模型自动调用',
+          usageManual: '手动调用 /name',
+          times: ' 次',
+          usageNone: '还没有',
+          colModel: '模型',
+          colManual: '手动',
           namedHint: '「点名」= 这次调用前，最近一条用户消息里出现了技能名（推断，非记录）',
           excludedLine: (n) => `已排除统计 ${n} 个，点名字恢复：`,
           excludedFailed: '改排除失败：',
           auditTitle: '触发体检',
-          vague: '没写触发条件',
-          badgeVague: '无触发',
+          vague: '模型调用/手动',
+          badgeVague: '手动触发',
           auditBody: (n) => `${n} 个可调技能的描述里没有「什么时候用」，模型匹配不上，等于隐形。`,
           auditGood: '所有可调技能的描述都写了使用条件。',
           copyRule: '复制「技能优先」指令',
@@ -221,6 +227,12 @@ window.__ModuleLoader__.load({
           excludeSkill: 'Skip in stats',
           includeSkill: 'Count again',
           namedCol: 'Named',
+          usageModel: 'Model-invoked',
+          usageManual: 'Manual /name',
+          times: ' calls',
+          usageNone: 'none yet',
+          colModel: 'model',
+          colManual: 'manual',
           namedHint: '"Named" means the turn\'s user message mentioned the skill before the call — a heuristic, not a recorded fact.',
           excludedLine: (n) => `${n} excluded from stats — click a name to restore: `,
           excludedFailed: 'Exclude failed: ',
@@ -379,7 +391,16 @@ window.__ModuleLoader__.load({
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .sd-bar-track { height: 5px; border-radius: 999px; background: var(--dsw-alias-bg-layer-2); overflow: hidden; }
-.sd-bar-fill { display: block; height: 100%; border-radius: 999px; background: var(--dsw-alias-brand-primary); opacity: .75; }
+.sd-bar-fill {
+  display: block; height: 100%; border-radius: 999px;
+  background: var(--dsw-alias-state-warn-primary); opacity: .85;
+}
+.sd-bar-fill.is-manual { opacity: 1; }
+.sd-usage-head {
+  display: flex; align-items: baseline; gap: 6px; margin-top: 4px;
+  font-size: 10px; color: var(--dsw-alias-label-secondary);
+}
+.sd-usage-total { margin-left: auto; font-variant-numeric: tabular-nums; }
 .sd-bar-count { font-size: 10px; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
 .sd-health { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .sd-pill {
@@ -938,10 +959,18 @@ window.__ModuleLoader__.load({
             ? T.sessionOnlyFailed(failedCalls)
             : T.sessionEmpty
           : T.sessionUsage(usedSkills, usedCalls) + (failedCalls > 0 ? T.sessionFailed(failedCalls) : '')
+      const manualUsage = (activeUsage && activeUsage.manualByName) || {}
+      const manualTotal = (activeUsage && typeof activeUsage.manualTotal === 'number')
+        ? activeUsage.manualTotal
+        : Object.values(manualUsage).reduce((sum, count) => sum + count, 0)
       const topSkills = Object.entries(usageBySkill)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 5)
       const topMax = topSkills.length > 0 ? topSkills[0][1] : 1
+      const topManual = Object.entries(manualUsage)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+      const manualMax = topManual.length > 0 ? topManual[0][1] : 1
       const unusedCount = Math.max(0, skills.length - usedSkills)
       const pluginHealth = diag.data && diag.data.plugins ? diag.data.plugins : null
 
@@ -1000,14 +1029,17 @@ window.__ModuleLoader__.load({
         return T.daysAgo(Math.floor(hours / 24))
       }
 
-      const calledSkills = Object.entries(usageBySkill)
-        .sort((a, b) => b[1] - a[1])
-        .map(([name, count]) => ({
+      const calledSkills = [...new Set([...Object.keys(usageBySkill), ...Object.keys(manualUsage)])]
+        .map((name) => ({
           name,
-          count,
-          last: (activeUsage && activeUsage.lastByName && activeUsage.lastByName[name]) || 0,
-          named: (activeUsage && activeUsage.namedByName && activeUsage.namedByName[name]) || 0,
+          model: usageBySkill[name] ?? 0,
+          manual: manualUsage[name] ?? 0,
+          last: Math.max(
+            (activeUsage && activeUsage.lastByName && activeUsage.lastByName[name]) || 0,
+            (activeUsage && activeUsage.manualLastByName && activeUsage.manualLastByName[name]) || 0,
+          ),
         }))
+        .sort((a, b) => (b.model + b.manual) - (a.model + a.manual))
 
       const unusedSkills = skills.filter((skill) => !usageBySkill[skill.name])
       const situationTitle = {}
@@ -1171,7 +1203,7 @@ window.__ModuleLoader__.load({
 
           h("div", { className: "sd-section-title" }, T.usageTitle),
           h('div', { className: 'sd-status-row' },
-            h('span', { className: 'sd-pill' }, usageScope === 'all' ? T.allSessions : T.sessionLabel, ' ', usageText),
+            h('span', { className: 'sd-pill' }, usageScope === 'all' ? T.allSessions : T.sessionLabel, ' ', (usedCalls - manualTotal) + ' 模型 · ' + manualTotal + ' 手动'),
             h('button', {
               type: 'button',
               className: 'sd-btn-sm',
@@ -1180,6 +1212,10 @@ window.__ModuleLoader__.load({
             }, usageLoading ? T.scanning : usageScope === 'all' ? T.scopeSession : T.scopeAll),
           ),
 
+          h('div', { className: 'sd-usage-head' },
+            T.usageModel,
+            h('span', { className: 'sd-usage-total' }, String(usedCalls - manualTotal) + T.times),
+          ),
           topSkills.length > 0
             ? h('div', { className: 'sd-bars' },
                 topSkills.map(([name, count]) =>
@@ -1192,15 +1228,33 @@ window.__ModuleLoader__.load({
                   ),
                 ),
               )
-            : null,
+            : h('div', { className: 'sd-status-note' }, T.usageNone),
+
+          h('div', { className: 'sd-usage-head' },
+            T.usageManual,
+            h('span', { className: 'sd-usage-total' }, String(manualTotal) + T.times),
+          ),
+          topManual.length > 0
+            ? h('div', { className: 'sd-bars' },
+                topManual.map(([name, count]) =>
+                  h('div', { className: 'sd-bar-row', key: name },
+                    h('span', { className: 'sd-bar-name', title: name }, name),
+                    h('span', { className: 'sd-bar-track' },
+                      h('span', { className: 'sd-bar-fill is-manual', style: { width: Math.max(6, Math.round((count / manualMax) * 100)) + '%' } }),
+                    ),
+                    h('span', { className: 'sd-bar-count' }, String(count)),
+                  ),
+                ),
+              )
+            : h('div', { className: 'sd-status-note' }, T.usageNone),
 
           calledSkills.length > 0
             ? h('div', { className: 'sd-table' },
                 calledSkills.map((entry) =>
                   h('div', { className: 'sd-trow', key: entry.name },
                     h('span', { className: 'sd-tname', title: entry.name }, entry.name),
-                    h('span', { className: 'sd-tcount', title: T.namedHint }, String(entry.count)),
-                    h('span', { className: 'sd-tnamed', title: T.namedHint }, entry.named > 0 ? String(entry.named) : '·'),
+                    h('span', { className: 'sd-tcount', title: T.colModel }, entry.model > 0 ? String(entry.model) : '·'),
+                    h('span', { className: 'sd-tnamed', title: T.colManual }, entry.manual > 0 ? String(entry.manual) : '·'),
                     h('span', { className: 'sd-tlast' }, ago(entry.last)),
                     h('button', {
                       type: 'button',

@@ -301,9 +301,11 @@ function readUsage(ctx, sessionId, excluded = new Set()) {
     return {
       sessionId,
       total: countExcluding(tally.byName, excluded),
+      manualTotal: countExcluding(tally.manualByName, excluded),
       byName: omitExcluded(tally.byName, excluded),
       lastByName: omitExcluded(tally.lastByName, excluded),
-      namedByName: omitExcluded(tally.namedByName, excluded),
+      manualByName: omitExcluded(tally.manualByName, excluded),
+      manualLastByName: omitExcluded(tally.manualLastByName, excluded),
       excluded: [...excluded],
     }
   } catch (error) {
@@ -625,8 +627,10 @@ export function apply(ctx) {
     const list = Array.isArray(records) ? records.slice(0, 30) : []
     const byName = {}
     const lastByName = {}
-    const namedByName = {}
+    const manualByName = {}
+    const manualLastByName = {}
     let total = 0
+    let manualTotal = 0
     let scanned = 0
     const deadline = Date.now() + 8000
 
@@ -649,8 +653,11 @@ export function apply(ctx) {
         for (const [name, time] of Object.entries(tally.lastByName ?? {})) {
           if (time > (lastByName[name] ?? 0)) lastByName[name] = time
         }
-        for (const [name, count] of Object.entries(tally.namedByName ?? {})) {
-          namedByName[name] = (namedByName[name] ?? 0) + count
+        for (const [name, count] of Object.entries(tally.manualByName ?? {})) {
+          manualByName[name] = (manualByName[name] ?? 0) + count
+        }
+        for (const [name, time] of Object.entries(tally.manualLastByName ?? {})) {
+          if (time > (manualLastByName[name] ?? 0)) manualLastByName[name] = time
         }
         scanned += 1
       } catch (error) {
@@ -663,9 +670,11 @@ export function apply(ctx) {
       sessions: scanned,
       available: list.length,
       total: countExcluding(byName, excluded),
+      manualTotal: countExcluding(manualByName, excluded),
       byName: omitExcluded(byName, excluded),
       lastByName: omitExcluded(lastByName, excluded),
-      namedByName: omitExcluded(namedByName, excluded),
+      manualByName: omitExcluded(manualByName, excluded),
+      manualLastByName: omitExcluded(manualLastByName, excluded),
       excluded: [...excluded],
       partial: scanned < list.length,
     }
