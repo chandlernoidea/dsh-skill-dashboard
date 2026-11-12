@@ -118,6 +118,8 @@ window.__ModuleLoader__.load({
           excludedLine: (n) => `已排除统计 ${n} 个，点名字恢复：`,
           excludedFailed: '改排除失败：',
           auditTitle: '触发体检',
+          vague: '没写触发条件',
+          badgeVague: '无触发',
           auditBody: (n) => `${n} 个可调技能的描述里没有「什么时候用」，模型匹配不上，等于隐形。`,
           auditGood: '所有可调技能的描述都写了使用条件。',
           copyRule: '复制「技能优先」指令',
@@ -223,6 +225,8 @@ window.__ModuleLoader__.load({
           excludedLine: (n) => `${n} excluded from stats — click a name to restore: `,
           excludedFailed: 'Exclude failed: ',
           auditTitle: 'Trigger audit',
+          vague: 'No trigger',
+          badgeVague: 'no trigger',
           auditBody: (n) => `${n} invocable skills never say when to use them — the model cannot match them.`,
           auditGood: 'Every invocable skill states its usage condition.',
           copyRule: 'Copy the "skills first" rule',
@@ -525,6 +529,16 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-state-warn-primary);
   background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent);
   font-weight: 600;
+}
+.sd-badge.is-vague {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 40%, transparent);
+  color: var(--dsw-alias-state-warn-primary);
+  opacity: .85;
+}
+.sd-chip[data-chip="vague"][aria-pressed="true"] {
+  border-color: var(--dsw-alias-state-warn-primary);
+  color: var(--dsw-alias-state-warn-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent);
 }
 .sd-desc {
   margin: 0; color: var(--dsw-alias-label-secondary);
@@ -1017,6 +1031,8 @@ window.__ModuleLoader__.load({
         return !WHEN_MARKERS.test(text)
       })
 
+      const vagueSet = new Set(vagueSkills.map((skill) => skill.name))
+
       const RULE_SNIPPET = [
         "## 技能优先",
         "",
@@ -1143,6 +1159,14 @@ window.__ModuleLoader__.load({
                 setOverrideNotice(T.ruleCopied)
               },
             }, overrideNotice === T.ruleCopied ? T.ruleCopied : T.copyRule),
+            h("button", {
+              type: "button",
+              className: "sd-btn-sm",
+              onClick: () => {
+                setMode("vague")
+                setView("skills")
+              },
+            }, T.vague),
           ),
 
           h("div", { className: "sd-section-title" }, T.usageTitle),
@@ -1235,6 +1259,7 @@ window.__ModuleLoader__.load({
         if (mode === 'manual') return skill.modelInvocable === false
         if (mode === 'files') return Boolean(skill.path)
         if (mode === 'registry') return !skill.path
+        if (mode === 'vague') return vagueSet.has(skill.name)
         return true
       })
 
@@ -1253,6 +1278,7 @@ window.__ModuleLoader__.load({
         { value: 'manual', label: T.manual, count: counts.manual, chip: 'manual' },
         { value: 'files', label: T.files, count: counts.files },
         { value: 'registry', label: T.registry, count: counts.registry },
+        { value: 'vague', label: T.vague, count: vagueSkills.length, chip: 'vague' },
       ]
 
       const showBanner = mode === 'all' && counts.manual > 0 && data.status === 'ready'
@@ -1280,6 +1306,7 @@ window.__ModuleLoader__.load({
             h('div', { className: 'sd-badges' },
               manual ? h('span', { className: 'sd-badge is-manual' }, T.badgeManual) : h('span', { className: 'sd-badge' }, T.badgeAuto),
               skill.situationSource === 'heuristic' ? h('span', { className: 'sd-badge' }, T.auto) : null,
+              vagueSet.has(skill.name) ? h('span', { className: 'sd-badge is-vague' }, T.badgeVague) : null,
             ),
           ),
           description ? h('p', { className: 'sd-desc', title: translated ? skill.description : undefined }, description) : null,
