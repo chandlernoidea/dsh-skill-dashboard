@@ -22,7 +22,17 @@ The dashboard indexes both cases.
 - **Reclassify from the UI**: move a skill to another situation; the choice is written to your user override file, not the package.
 - **Diagnostics on demand**: a copyable plain-text report on plugin health, produced only when you ask for it.
 - **Usage**: the top skills of the current session with call counts, how many were never called, and an opt-in scan across recent sessions.
+- **Starter guide**: when the current scope has zero skill calls, the top of the list suggests up to three skills that the model can choose, that state when to use them, and that have not been tried yet — with the same insert/copy actions as a normal card.
+- **Skill change detection**: the panel diffs the live catalog against the snapshot you last acknowledged, lists new/removed skills, and puts a green "new" badge on added cards. The snapshot only advances when you click "got it", so the 30-second poll does not erase the markers. Removed skills can be pruned from the override table in one click (with the usual one-step undo).
+- **Usage profile**: every skill lands in one of four plain states — auto-running (the model chooses it), your workflow (you name it), not used yet, tried but failed — so a beginner can read the numbers without interpreting a bar chart.
+- **Per-situation usage**: model/manual calls and used/total for each situation, so a whole group that has never run is visible. Click a situation row to jump back to the skills list filtered to that group; the "Unused" chip shows only skills that have never run. The all-sessions scan is cached for 60 seconds; only complete scans are cached.
+- **One-click translation**: a banner appears in the Chinese UI while descriptions are still English. The first click shows a consent panel (item count, characters, model); tick "remember" and later clicks translate immediately. Only the description is replaced — the skill name stays unchanged because `/name` needs it. A failed batch does not abandon the rest; the banner tells you how many are still pending. Each translated card has a "Retranslate" action that drops that cache entry first, so a bad translation can be redone without clearing everything.
+- **Preview, apply, undo for plans**: importing a grouping table first shows exactly which skills change situation and which stats exclusions are added or removed; applying keeps the previous table so one click restores it. A reset-to-default plan uses the same preview/undo.
 - **Localised UI**: English by default, Chinese when the host is Chinese.
+
+## Privacy
+
+The plugin does not report telemetry and has no vendor endpoint. The only model call is the translation button: it uses the DSH model service with the model selected in the current session, and it runs only after the consent panel is confirmed. It sends skill names, descriptions and `whenToUse` text — never the conversation, tool output, or file contents. The cache lives in `~/.dsh/skill-dashboard/translations.json`.
 
 ## Requirements
 
@@ -101,7 +111,7 @@ An override can add situations and change skills; it cannot delete a packaged en
 
 ## How it works
 
-The plugin has two halves. `index.js` runs in the host and registers HTTP routes. `client.js` runs in the browser, registers the sidebar tab and renders it. The data-shaping logic is a pure function in `lib/compose.js` so it can be tested without a host.
+The plugin has two halves. `index.js` runs in the host and registers HTTP routes. `client.js` (generated from `src/client/`, served as one module) runs in the browser, registers the sidebar tab and renders it. The data-shaping logic is a pure function in `lib/compose.js` so it can be tested without a host.
 
 | Route | Purpose |
 | --- | --- |
@@ -125,13 +135,14 @@ This plugin is **read-only by design**: it does not install, uninstall, update, 
 ## Development
 
 ```bash
-npm run check   # syntax, taxonomy, package contents, tests
+npm run build   # regenerate client.js from src/client/
+npm run check   # build sync, syntax, taxonomy, package contents, tests
 npm test        # node --test only
 ```
 
 `npm run check` is what CI runs in [`.github/workflows/check.yml`](.github/workflows/check.yml).
 
-After editing `index.js`, reload the bundle (`plugin_manager` disable, then enable): HMR does not re-import the host module. After editing `client.js`, reload the page.
+After editing `index.js`, reload the bundle (`plugin_manager` disable, then enable): HMR does not re-import the host module. After editing `src/client/`, run `npm run build` and reload the page. `client.js` is generated — do not edit it by hand; see [`src/client/README.md`](src/client/README.md).
 
 ### Releasing
 
@@ -145,6 +156,7 @@ bash scripts/publish-wizard.sh
 
 Issues and feature requests go to [GitHub Issues](https://github.com/chandlernoidea/dsh-skill-dashboard/issues). Pull requests are welcome.
 
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for the layout, the read-only boundary, and the test seams.
 - Keep taxonomy changes in JSON; JavaScript changes need a test under `test/`.
 - Run `npm run check` before opening a pull request.
 - CI must pass.

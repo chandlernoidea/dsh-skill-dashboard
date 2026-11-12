@@ -1,0 +1,65 @@
+name: Bug report
+description: Something is broken or confusing in the dashboard
+labels: [needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please remove secrets, tokens and private skill content before posting.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what did you see instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the 技能 tab
+        2. Click 一键汉化
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Plugin version / commit
+      description: From package.json or the commit you installed.
+      placeholder: 0.1.0 / abc1234
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: DSH version
+      description: The Host build shown in the app.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Skill list / grouping
+        - Usage / profile
+        - Diagnostics
+        - One-click translation
+        - Override plans / undo
+        - Skill change detection
+        - Install / packaging
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Error text, a screenshot, or the relevant `/api/skill-dash/...` response. Do not paste tokens.
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Checklist
+      options:
+        - label: I removed secrets and private skill content from this report.
+          required: true

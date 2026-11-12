@@ -42,7 +42,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check index.js && node --check client.js && node --check lib/compose.js && node --check lib/capabilities.js && node --check lib/usage.js && node tools/check-taxonomy.mjs && node tools/check-pack.mjs && node --test",
+    "build": "node scripts/build-client.mjs",
+    "check": "node scripts/build-client.mjs --check && node --check index.js && node --check client.js && node --check lib/compose.js && node --check lib/capabilities.js && node --check lib/usage.js && node --check lib/usage-cache.js && node --check lib/skills-snapshot.js && node --check lib/override.js && node --check lib/translate.js && node tools/check-taxonomy.mjs && node tools/check-pack.mjs && node --test",
     "test": "node --test"
   },
   "keywords": [

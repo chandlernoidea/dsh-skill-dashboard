@@ -13,11 +13,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Syntax
-        run: node --check index.js && node --check client.js && node --check lib/compose.js
-      - name: Taxonomy
-        run: node tools/check-taxonomy.mjs
-      - name: Package contents
-        run: node tools/check-pack.mjs
-      - name: Tests
-        run: node --test
+      - name: Check (build sync, syntax, taxonomy, package, tests)
+        run: npm run check

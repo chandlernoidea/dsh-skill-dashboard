@@ -13,12 +13,27 @@
  * set the model sees, without activating a cold Agent.
  */
 
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { composeDashboard } from './lib/compose.js'
 import { summarizeAvailability } from './lib/capabilities.js'
-import { tallySkillUsage } from './lib/usage.js'
+import { assignSituation, normalizeOverride, pruneOverride, readOverride, replaceOverride, restoreUndo, saveUndo, setExcluded, updateOverride } from './lib/override.js'
+import {
+  BATCH_SIZE,
+  MAX_SKILLS,
+  estimateChars,
+  mergeTranslationCache,
+  pendingSkills,
+  readTranslationCache,
+  forgetTranslations,
+  sourceHash,
+  translateBatch,
+  translationsFor,
+} from './lib/translate.js'
+import { composeUsage, tallySkillUsage } from './lib/usage.js'
+import { USAGE_CACHE_TTL_MS, readUsageCache, usageCacheKey, writeUsageCache } from './lib/usage-cache.js'
+import { diffSkills, readSkillsSnapshot, writeSkillsSnapshot } from './lib/skills-snapshot.js'
 
 export const name = 'dsh-skill-dashboard'
 
@@ -32,6 +47,12 @@ const CLASSIFY_PATH = '/api/skill-dash/classify'
 const EXCLUDE_PATH = '/api/skill-dash/exclude'
 const OVERRIDE_PATH = '/api/skill-dash/override'
 const OVERRIDE_IMPORT_PATH = '/api/skill-dash/override/import'
+const OVERRIDE_PRUNE_PATH = '/api/skill-dash/override/prune'
+const OVERRIDE_PREVIEW_PATH = '/api/skill-dash/override/preview'
+const OVERRIDE_UNDO_PATH = '/api/skill-dash/override/undo'
+const TRANSLATE_PATH = '/api/skill-dash/translate'
+const TRANSLATE_FORGET_PATH = '/api/skill-dash/translate/forget'
+const SKILLS_ACK_PATH = '/api/skill-dash/skills/ack'
 const TAXONOMY_URL = new URL('./taxonomy.json', import.meta.url)
 
 const FALLBACK_TAXONOMY = {
@@ -72,16 +93,12 @@ function json(body, status = 200) {
  * The user's own override table. Absent is normal — no note. Unreadable or
  * malformed is ignored, and the note reaches the Client so the user is told
  * instead of silently wondering why their edit did nothing.
+ *
+ * Writes go through `lib/override.js`, which owns validation, serialisation
+ * and the corrupt-file backup; read and write therefore agree on the shape.
  */
 async function loadOverride() {
-  const file = overrideFile()
-  try {
-    const raw = await readFile(file, 'utf8')
-    return { data: JSON.parse(raw), file, note: '' }
-  } catch (error) {
-    if (error && error.code === 'ENOENT') return { data: null, file, note: '' }
-    return { data: null, file, note: `覆盖表读取失败，已忽略：${error?.message ?? error}` }
-  }
+  return readOverride(overrideFile())
 }
 
 function overrideFile() {
@@ -92,19 +109,6 @@ function overrideFile() {
 function excludeOf(override) {
   const list = override !== null && typeof override === 'object' && Array.isArray(override.data?.exclude) ? override.data.exclude : []
   return new Set(list.filter((name) => typeof name === 'string' && name !== ''))
-}
-
-function omitExcluded(map, excluded) {
-  if (excluded.size === 0) return map ?? {}
-  const out = {}
-  for (const [key, value] of Object.entries(map ?? {})) if (!excluded.has(key)) out[key] = value
-  return out
-}
-
-function countExcluding(byName, excluded) {
-  let total = 0
-  for (const [key, value] of Object.entries(byName ?? {})) if (!excluded.has(key)) total += value
-  return total
 }
 
 /**
@@ -140,75 +144,6 @@ function postJson(handler) {
   }
 }
 
-/**
- * Record one skill's situation in the user's override table. Read-modify-write
- * through a temp file so a crash cannot leave half a table behind; everything
- * the user already wrote keeps its place.
- */
-async function writeOverride(name, situation) {
-  return writeOverrides([name], situation)
-}
-
-/** Assign several skills in one read-modify-write, so a batch is atomic. */
-async function writeOverrides(names, situation) {
-  const file = overrideFile()
-  await mkdir(dirname(file), { recursive: true })
-
-  let data = {}
-  try {
-    const parsed = JSON.parse(await readFile(file, 'utf8'))
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) data = parsed
-  } catch (error) {
-    data = {}
-  }
-
-  const skills = data.skills !== null && typeof data.skills === 'object' && !Array.isArray(data.skills) ? data.skills : {}
-  for (const name of names) {
-    const previous = skills[name] !== null && typeof skills[name] === 'object' && !Array.isArray(skills[name]) ? skills[name] : {}
-    skills[name] = { ...previous, situation }
-  }
-  data.skills = skills
-
-  const temporary = `${file}.tmp`
-  await writeFile(temporary, JSON.stringify(data, null, 2) + '\n', 'utf8')
-  await rename(temporary, file)
-  return file
-}
-
-/** Replace the whole override table (import). */
-async function writeRawOverride(data) {
-  const file = overrideFile()
-  await mkdir(dirname(file), { recursive: true })
-  const temporary = `${file}.tmp`
-  await writeFile(temporary, JSON.stringify(data, null, 2) + '\n', 'utf8')
-  await rename(temporary, file)
-  return file
-}
-
-/** Add or remove one skill from the exclude list, keeping everything else. */
-async function writeExclude(name, excluded) {
-  const file = overrideFile()
-  await mkdir(dirname(file), { recursive: true })
-
-  let data = {}
-  try {
-    const parsed = JSON.parse(await readFile(file, 'utf8'))
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) data = parsed
-  } catch (error) {
-    data = {}
-  }
-
-  const current = Array.isArray(data.exclude) ? data.exclude.filter((entry) => typeof entry === 'string') : []
-  const next = excluded ? [...new Set([...current, name])] : current.filter((entry) => entry !== name)
-  if (next.length === 0) delete data.exclude
-  else data.exclude = next
-
-  const temporary = `${file}.tmp`
-  await writeFile(temporary, JSON.stringify(data, null, 2) + '\n', 'utf8')
-  await rename(temporary, file)
-  return file
-}
-
 function fromEntry(entry) {
   const path = entry.path ?? ''
   return {
@@ -219,7 +154,6 @@ function fromEntry(entry) {
     provider: entry.provider ?? '',
     path,
     modelInvocable: entry.modelInvocable !== false,
-    userInvocable: true,
   }
 }
 
@@ -233,7 +167,6 @@ function fromSummary(summary) {
     provider: summary.provider ?? '',
     path: summary.path ?? '',
     modelInvocable: invocation.modelInvocable !== false,
-    userInvocable: invocation.userInvocable !== false,
   }
 }
 
@@ -297,17 +230,7 @@ function readUsage(ctx, sessionId, excluded = new Set()) {
     // history is inherited, so count the whole log instead.
     const events =
       typeof session.snapshotEvents === 'function' ? session.snapshotEvents() : typeof session.ownEvents === 'function' ? session.ownEvents() : []
-    const tally = tallySkillUsage(events)
-    return {
-      sessionId,
-      total: countExcluding(tally.byName, excluded),
-      manualTotal: countExcluding(tally.manualByName, excluded),
-      byName: omitExcluded(tally.byName, excluded),
-      lastByName: omitExcluded(tally.lastByName, excluded),
-      manualByName: omitExcluded(tally.manualByName, excluded),
-      manualLastByName: omitExcluded(tally.manualLastByName, excluded),
-      excluded: [...excluded],
-    }
+    return { sessionId, ...composeUsage([tallySkillUsage(events)], { excluded }) }
   } catch (error) {
     console.warn('skill-dashboard: usage unavailable', error)
     return null
@@ -378,11 +301,9 @@ export function apply(ctx) {
     }
   }
 
-  const readCatalog = async (url, signal) => {
-    const sessionId = url.searchParams.get('session') || currentSessionId()
+  const readCatalogFor = async (sessionId, signal) => {
     const skills = ctx.get('skills')
     const notes = []
-
     if (sessionId) {
       const catalog = ctx.get('sessionSkillCatalog')
       if (catalog !== undefined) {
@@ -421,16 +342,69 @@ export function apply(ctx) {
     return { items: list.map(fromSummary), via: 'global', note: notes.join(' | ') }
   }
 
+  // One catalog read per request burst. `/data` and `/zh` fire together when
+  // the panel opens; without this they each call the host catalog. The TTL is
+  // short so an install is still visible within a couple of seconds.
+  const catalogCache = new Map()
+  const catalogInFlight = new Map()
+  const CATALOG_TTL_MS = 500
+  const readCatalogCached = async (sessionId) => {
+    const key = sessionId || ''
+    const hit = catalogCache.get(key)
+    if (hit !== undefined && Date.now() - hit.at < CATALOG_TTL_MS) return hit.value
+    const pending = catalogInFlight.get(key)
+    if (pending !== undefined) return pending
+    const request = readCatalogFor(sessionId, undefined)
+      .then((value) => {
+        catalogCache.set(key, { at: Date.now(), value })
+        return value
+      })
+      .finally(() => {
+        catalogInFlight.delete(key)
+      })
+    catalogInFlight.set(key, request)
+    return request
+  }
+  const readCatalog = async (url) => readCatalogCached(url.searchParams.get('session') || currentSessionId())
+
+  const capabilityReport = () => ({
+    sessionSkillCatalog: ctx.get('sessionSkillCatalog') !== undefined,
+    skills: ctx.get('skills') !== undefined,
+    sessions: ctx.get('sessions') !== undefined,
+    translator: ctx.get('translator') !== undefined,
+    llm: ctx.get('llm') !== undefined,
+    agents: ctx.get('agents') !== undefined,
+  })
+
+  // The model the user selected in this Session, used for opt-in translation.
+  const sessionModel = (sessionId) => {
+    try {
+      const agent = ctx.get('agents')?.get?.(sessionId)
+      const selection = agent?.model?.current?.()
+      if (selection?.provider && selection?.model) return { provider: selection.provider, model: selection.model }
+      if (agent?.options?.provider && agent?.options?.model) {
+        return { provider: agent.options.provider, model: agent.options.model }
+      }
+    } catch (error) {
+      /* no live agent: translation stays unavailable */
+    }
+    return null
+  }
+
+  const translationFile = () =>
+    join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skill-dashboard', 'translations.json')
+
+  const usageCacheFile = () =>
+    join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skill-dashboard', 'usage-cache.json')
+
+  const skillsSnapshotFile = () =>
+    join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skill-dashboard', 'skills-snapshot.json')
+
   const handle = async (request) => {
     const url = new URL(request.url)
     const signal = request?.signal ?? new AbortController().signal
     const language = url.searchParams.get('lang') || ''
-    const capabilities = summarizeAvailability({
-      sessionSkillCatalog: ctx.get('sessionSkillCatalog') !== undefined,
-      skills: ctx.get('skills') !== undefined,
-      sessions: ctx.get('sessions') !== undefined,
-      translator: ctx.get('translator') !== undefined,
-    })
+    const capabilities = summarizeAvailability(capabilityReport())
 
     let result
     try {
@@ -443,6 +417,37 @@ export function apply(ctx) {
     const override = await loadOverride()
     const sessionId = url.searchParams.get('session') || currentSessionId()
     const usage = readUsage(ctx, sessionId, excludeOf(override))
+    const model = sessionModel(sessionId)
+    const translationCache = await readTranslationCache(translationFile())
+
+    // Compare against the snapshot the user last acknowledged. A first run (or
+    // a corrupt snapshot) initializes it instead of reporting the whole
+    // catalog as new; an empty catalog never advances it.
+    let skillsChanges = { added: [], removed: [] }
+    if (Array.isArray(result.items) && result.items.length > 0) {
+      const snapshot = await readSkillsSnapshot(skillsSnapshotFile())
+      if (snapshot === null) {
+        try {
+          await writeSkillsSnapshot(skillsSnapshotFile(), result.items)
+        } catch (error) {
+          // A failed snapshot only means no change markers this time.
+        }
+      } else {
+        skillsChanges = diffSkills(snapshot, result.items)
+      }
+    }
+
+    const translateInfoFor = (skills) => {
+      const pending = pendingSkills((skills ?? []).filter((skill) => !skill.zh), translationCache).slice(0, MAX_SKILLS)
+      return {
+        available: Boolean(model) && ctx.get('llm') !== undefined,
+        provider: model?.provider ?? '',
+        model: model?.model ?? '',
+        pending: pending.length,
+        chars: estimateChars(pending),
+        limit: MAX_SKILLS,
+      }
+    }
 
     if (result.items === null) {
       // Not an HTTP error: the page is reachable, it just has nothing to show.
@@ -458,6 +463,10 @@ export function apply(ctx) {
         overrideNote: override.note,
         capabilities,
         usage,
+        model,
+        zh: {},
+        translate: translateInfoFor([]),
+        skillsChanges,
         problem: { code: 'no-catalog' },
         ...composed,
       })
@@ -475,6 +484,10 @@ export function apply(ctx) {
       overrideNote: override.note,
       capabilities,
       usage,
+      model,
+      zh: translationsFor(composed.skills, translationCache),
+      translate: translateInfoFor(composed.skills),
+      skillsChanges,
       ...composed,
     })
   }
@@ -575,12 +588,7 @@ export function apply(ctx) {
     const plugins = await readPlugins(ctx)
     const taxonomy = await loadTaxonomy()
     const override = await loadOverride()
-    const capabilities = summarizeAvailability({
-      sessionSkillCatalog: ctx.get('sessionSkillCatalog') !== undefined,
-      skills: ctx.get('skills') !== undefined,
-      sessions: ctx.get('sessions') !== undefined,
-      translator: ctx.get('translator') !== undefined,
-    })
+    const capabilities = summarizeAvailability(capabilityReport())
 
     let counts = null
     try {
@@ -620,22 +628,54 @@ export function apply(ctx) {
   const readUsageAll = async (signal, excluded = new Set()) => {
     const query = ctx.get('sessionQuery')
     if (query === undefined || typeof query.listSessions !== 'function') {
-      return { scope: 'all', error: 'sessionQuery unavailable', sessions: 0, available: 0, total: 0, byName: {}, partial: false }
+      return {
+        scope: 'all',
+        available: false,
+        error: 'sessionQuery unavailable',
+        scanned: 0,
+        sessionCount: 0,
+        ...composeUsage([], { excluded }),
+      }
     }
 
-    const records = await query.listSessions(signal)
+    let records
+    try {
+      records = await query.listSessions(signal)
+    } catch (error) {
+      return {
+        scope: 'all',
+        available: false,
+        error: String(error?.message ?? error),
+        scanned: 0,
+        sessionCount: 0,
+        ...composeUsage([], { excluded }),
+      }
+    }
+
     const list = Array.isArray(records) ? records.slice(0, 30) : []
-    const byName = {}
-    const lastByName = {}
-    const manualByName = {}
-    const manualLastByName = {}
-    let total = 0
-    let manualTotal = 0
+    const key = usageCacheKey(list)
+    const cached = await readUsageCache(usageCacheFile())
+    if (cached !== null && cached.key === key && Date.now() - cached.at < USAGE_CACHE_TTL_MS) {
+      return {
+        scope: 'all',
+        available: true,
+        scanned: list.length,
+        sessionCount: list.length,
+        cached: true,
+        ...composeUsage(cached.tallies, { excluded }),
+      }
+    }
+
+    const tallies = []
     let scanned = 0
+    let deadlineHit = false
     const deadline = Date.now() + 8000
 
     for (const record of list) {
-      if (Date.now() > deadline) break
+      if (Date.now() > deadline) {
+        deadlineHit = true
+        break
+      }
       const id = record?.header?.id
       if (typeof id !== 'string' || id === '') continue
       try {
@@ -647,36 +687,28 @@ export function apply(ctx) {
           events = (await query.readSession(id))?.events ?? null
         }
         if (!events) continue
-        const tally = tallySkillUsage(events)
-        total += tally.total
-        for (const [name, count] of Object.entries(tally.byName)) byName[name] = (byName[name] ?? 0) + count
-        for (const [name, time] of Object.entries(tally.lastByName ?? {})) {
-          if (time > (lastByName[name] ?? 0)) lastByName[name] = time
-        }
-        for (const [name, count] of Object.entries(tally.manualByName ?? {})) {
-          manualByName[name] = (manualByName[name] ?? 0) + count
-        }
-        for (const [name, time] of Object.entries(tally.manualLastByName ?? {})) {
-          if (time > (manualLastByName[name] ?? 0)) manualLastByName[name] = time
-        }
+        tallies.push(tallySkillUsage(events))
         scanned += 1
       } catch (error) {
         // One unreadable session must not abort the scan.
       }
     }
 
+    const partial = deadlineHit || scanned < list.length
+    if (!partial) {
+      try {
+        await writeUsageCache(usageCacheFile(), key, tallies)
+      } catch (error) {
+        // The cache is best effort; a failed write must not fail the scan.
+      }
+    }
     return {
       scope: 'all',
-      sessions: scanned,
-      available: list.length,
-      total: countExcluding(byName, excluded),
-      manualTotal: countExcluding(manualByName, excluded),
-      byName: omitExcluded(byName, excluded),
-      lastByName: omitExcluded(lastByName, excluded),
-      manualByName: omitExcluded(manualByName, excluded),
-      manualLastByName: omitExcluded(manualLastByName, excluded),
-      excluded: [...excluded],
-      partial: scanned < list.length,
+      available: true,
+      scanned,
+      sessionCount: list.length,
+      cached: false,
+      ...composeUsage(tallies, { excluded, partial }),
     }
   }
 
@@ -723,8 +755,8 @@ export function apply(ctx) {
       return { status: 400, body: { ok: false, error: `unknown situation: ${situation}` } }
     }
 
-    const file = await writeOverrides(names, situation)
-    return { body: { ok: true, names, situation, file } }
+    const result = await updateOverride(overrideFile(), (data) => assignSituation(data, names, situation))
+    return { body: { ok: true, names, situation, file: result.file, ...(result.backup ? { backup: result.backup } : {}) } }
   })
 
   ctx.effect(() =>
@@ -738,8 +770,8 @@ export function apply(ctx) {
   const handleExclude = postJson(async (body) => {
     const name = typeof body?.name === 'string' ? body.name.trim() : ''
     if (name === '') return { status: 400, body: { ok: false, error: 'name is required' } }
-    const file = await writeExclude(name, body?.excluded === true)
-    return { body: { ok: true, name, excluded: body?.excluded === true, file } }
+    const result = await updateOverride(overrideFile(), (data) => setExcluded(data, name, body?.excluded === true))
+    return { body: { ok: true, name, excluded: body?.excluded === true, file: result.file, ...(result.backup ? { backup: result.backup } : {}) } }
   })
 
   ctx.effect(() =>
@@ -763,19 +795,85 @@ export function apply(ctx) {
     }),
   )
 
-  const handleImport = postJson(async (body) => {
-    const data = body?.data
-    if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+  const sessionForBody = (body) =>
+    typeof body?.session === 'string' && body.session !== '' ? body.session : currentSessionId()
+
+  // PULSE-style "preview before apply", adapted to the read-only design: a
+  // plan can only change the user's override table, never a skill file.
+  const handlePreview = postJson(async (body) => {
+    const normalized = normalizeOverride(body?.data)
+    if (normalized === null) {
       return { status: 400, body: { ok: false, error: 'data must be an object' } }
     }
-    if (data.skills !== undefined && (data.skills === null || typeof data.skills !== 'object' || Array.isArray(data.skills))) {
-      return { status: 400, body: { ok: false, error: 'data.skills must be an object' } }
+    if (normalized.problems.length > 0) {
+      return { status: 400, body: { ok: false, error: normalized.problems.join('; ') } }
     }
-    if (data.exclude !== undefined && !Array.isArray(data.exclude)) {
-      return { status: 400, body: { ok: false, error: 'data.exclude must be an array' } }
+
+    let catalog = { items: [] }
+    try {
+      catalog = await readCatalogCached(sessionForBody(body))
+    } catch (error) {
+      return { status: 500, body: { ok: false, error: String(error?.message ?? error) } }
     }
-    const file = await writeRawOverride(data)
-    return { body: { ok: true, file, skills: Object.keys(data.skills ?? {}).length, exclude: (data.exclude ?? []).length } }
+
+    const items = Array.isArray(catalog.items) ? catalog.items : []
+    const taxonomy = await loadTaxonomy()
+    const override = await loadOverride()
+    const before = composeDashboard({ skills: items, taxonomy, override: override.data, language: '' })
+    const after = composeDashboard({ skills: items, taxonomy, override: normalized.data, language: '' })
+    const previous = new Map(before.skills.map((skill) => [skill.name, skill.situation]))
+    const changes = after.skills
+      .filter((skill) => previous.has(skill.name) && previous.get(skill.name) !== skill.situation)
+      .map((skill) => ({ name: skill.name, from: previous.get(skill.name), to: skill.situation }))
+
+    const beforeExclude = new Set(Array.isArray(override.data?.exclude) ? override.data.exclude : [])
+    const afterExclude = new Set(Array.isArray(normalized.data.exclude) ? normalized.data.exclude : [])
+    const excludeAdded = [...afterExclude].filter((name) => !beforeExclude.has(name))
+    const excludeRemoved = [...beforeExclude].filter((name) => !afterExclude.has(name))
+
+    return {
+      body: {
+        ok: true,
+        changes,
+        excludeAdded,
+        excludeRemoved,
+        counts: {
+          situations: changes.length,
+          excludeAdded: excludeAdded.length,
+          excludeRemoved: excludeRemoved.length,
+        },
+      },
+    }
+  })
+
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: OVERRIDE_PREVIEW_PATH,
+      handler: handlePreview,
+    }),
+  )
+
+  const handleImport = postJson(async (body) => {
+    const normalized = normalizeOverride(body?.data)
+    if (normalized === null) {
+      return { status: 400, body: { ok: false, error: 'data must be an object' } }
+    }
+    if (normalized.problems.length > 0) {
+      return { status: 400, body: { ok: false, error: normalized.problems.join('; ') } }
+    }
+    const current = await loadOverride()
+    await saveUndo(overrideFile(), current.data)
+    const result = await replaceOverride(overrideFile(), normalized.data)
+    return {
+      body: {
+        ok: true,
+        file: result.file,
+        skills: Object.keys(normalized.data.skills ?? {}).length,
+        exclude: (normalized.data.exclude ?? []).length,
+        undo: true,
+      },
+    }
   })
 
   ctx.effect(() =>
@@ -783,6 +881,200 @@ export function apply(ctx) {
       kind: 'exact',
       path: OVERRIDE_IMPORT_PATH,
       handler: handleImport,
+    }),
+  )
+
+  // After a skill is uninstalled, its override row is dead weight. Prune only
+  // the names the Host says disappeared; keep a one-level undo like an import.
+  const handlePrune = postJson(async (body) => {
+    const names = Array.isArray(body?.names)
+      ? body.names.filter((name) => typeof name === 'string' && name !== '')
+      : []
+    if (names.length === 0) {
+      return { status: 400, body: { ok: false, error: 'names required' } }
+    }
+    const current = await loadOverride()
+    await saveUndo(overrideFile(), current.data)
+    const result = await replaceOverride(overrideFile(), pruneOverride(current.data, names))
+    return { body: { ok: true, file: result.file, removed: names.length, undo: true } }
+  })
+
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: OVERRIDE_PRUNE_PATH,
+      handler: handlePrune,
+    }),
+  )
+
+  const handleUndo = postJson(async () => {
+    const restored = await restoreUndo(overrideFile())
+    if (restored === null) {
+      return { status: 400, body: { ok: false, error: '没有可撤销的方案' } }
+    }
+    return { body: { ok: true, skills: Object.keys(restored.skills ?? {}).length } }
+  })
+
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: OVERRIDE_UNDO_PATH,
+      handler: handleUndo,
+    }),
+  )
+
+  // "Got it": advance the snapshot so the change markers disappear until the
+  // next install/removal. This is the only write that touches the snapshot.
+  const handleSkillsAck = postJson(async (body) => {
+    const sessionId = sessionForBody(body)
+    const catalog = await readCatalogCached(sessionId)
+    const items = Array.isArray(catalog.items) ? catalog.items : []
+    if (items.length === 0) {
+      return { status: 400, body: { ok: false, error: '技能目录为空，未更新快照' } }
+    }
+    await writeSkillsSnapshot(skillsSnapshotFile(), items)
+    return { body: { ok: true, skills: items.length } }
+  })
+
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: SKILLS_ACK_PATH,
+      handler: handleSkillsAck,
+    }),
+  )
+
+  // Opt-in translation. Nothing is sent on page load or on a timer: the body
+  // must carry `consent: true`, which only the Client's confirmation panel
+  // sends. One short request per batch, a hard cap, and a content-hash cache.
+  const handleTranslate = postJson(async (body) => {
+    if (body?.consent !== true) return { status: 400, body: { ok: false, error: 'consent required' } }
+    const llm = ctx.get('llm')
+    if (llm === undefined) return { status: 400, body: { ok: false, error: '模型服务不可用' } }
+
+    const sessionId = typeof body?.session === 'string' && body.session !== '' ? body.session : currentSessionId()
+    const target = sessionModel(sessionId)
+    if (target === null) return { status: 400, body: { ok: false, error: '当前会话没有选中模型' } }
+
+    // Translation is a simple task. Use the lowest reasoning effort the model
+    // advertises; inheriting the session's "high" setting can spend the whole
+    // output budget on reasoning and finish with max-tokens and no text.
+    let reasoningEffort = ''
+    try {
+      const info = await llm.resolveModelInfo?.(target.provider, target.model)
+      const efforts = info && info.reasoning && Array.isArray(info.reasoning.efforts) ? info.reasoning.efforts : []
+      if (efforts.length > 0) {
+        const rank = (id) =>
+          /none|off|minimal|disable/i.test(id) ? 0 : /low/i.test(id) ? 1 : /medium/i.test(id) ? 2 : /high/i.test(id) ? 3 : 4
+        const preferred = [...efforts].sort((a, b) => rank(a.id) - rank(b.id))[0]
+        if (preferred && typeof preferred.id === 'string') reasoningEffort = preferred.id
+      }
+    } catch (error) {
+      // Model metadata is advisory; without it the provider default applies.
+    }
+
+    let catalog = { items: [] }
+    try {
+      catalog = await readCatalogCached(sessionId)
+    } catch (error) {
+      return { status: 500, body: { ok: false, error: String(error?.message ?? error) } }
+    }
+
+    const items = Array.isArray(catalog.items) ? catalog.items : []
+    const requested = Array.isArray(body?.names)
+      ? new Set(body.names.filter((name) => typeof name === 'string' && name !== ''))
+      : null
+    const scoped = requested === null ? items : items.filter((item) => requested.has(item.name))
+    const cache = await readTranslationCache(translationFile())
+    const pending = pendingSkills(scoped, cache).slice(0, MAX_SKILLS)
+    if (pending.length === 0) {
+      return { body: { ok: true, zh: {}, translated: 0, skipped: 0, chars: 0, provider: target.provider, model: target.model } }
+    }
+
+    const controller = typeof AbortController === 'function' ? new AbortController() : null
+    const timer = controller ? setTimeout(() => controller.abort(), 30000) : null
+    const zh = {}
+    let error = ''
+    let consecutiveFailures = 0
+    try {
+      for (let index = 0; index < pending.length; index += BATCH_SIZE) {
+        if (controller?.signal.aborted) {
+          error = '翻译超时'
+          break
+        }
+        const batch = pending.slice(index, index + BATCH_SIZE)
+        try {
+          const translated = await translateBatch({
+            llm,
+            target,
+            sessionId,
+            skills: batch,
+            signal: controller?.signal,
+            reasoningEffort,
+          })
+          Object.assign(zh, translated)
+          consecutiveFailures = 0
+          const additions = {}
+          for (const item of batch) {
+            if (translated[item.name]) additions[item.name] = { hash: sourceHash(item), zh: translated[item.name] }
+          }
+          if (Object.keys(additions).length > 0) await mergeTranslationCache(translationFile(), additions)
+        } catch (batchError) {
+          error = String(batchError?.message ?? batchError)
+          consecutiveFailures += 1
+          // One bad batch should not abandon the rest; two in a row usually
+          // means the provider is down, so stop spending.
+          if (consecutiveFailures >= 2) break
+        }
+      }
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+
+    const translated = Object.keys(zh).length
+    return {
+      body: {
+        ok: translated > 0,
+        zh,
+        translated,
+        skipped: Math.max(0, pending.length - translated),
+        chars: estimateChars(pending),
+        provider: target.provider,
+        model: target.model,
+        ...(error ? { error } : {}),
+      },
+    }
+  })
+
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: TRANSLATE_PATH,
+      handler: handleTranslate,
+    }),
+  )
+
+  // Forget one skill (or all) so the next "translate" calls the model again
+  // instead of serving a stale/bad translation from the hash cache.
+  const handleForgetTranslate = postJson(async (body) => {
+    const names = Array.isArray(body?.names)
+      ? body.names.filter((name) => typeof name === 'string' && name !== '')
+      : null
+    const next = await forgetTranslations(translationFile(), names)
+    return {
+      body: {
+        ok: true,
+        cached: Object.keys(next).length,
+        forgotten: names === null ? 'all' : names.length,
+      },
+    }
+  })
+
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: TRANSLATE_FORGET_PATH,
+      handler: handleForgetTranslate,
     }),
   )
 }

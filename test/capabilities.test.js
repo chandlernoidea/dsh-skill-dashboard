@@ -8,6 +8,8 @@ const all = {
   skills: true,
   sessions: true,
   translator: true,
+  llm: true,
+  agents: true,
 }
 
 test('everything present: nothing missing, not fatal', () => {
@@ -42,5 +44,5 @@ test('both catalog sources missing: fatal, catalog entries reported', () => {
 test('an empty report is fatal rather than a crash', () => {
   const summary = summarizeAvailability(undefined)
   assert.equal(summary.fatal, true)
-  assert.equal(summary.missing.length, 4)
+  assert.equal(summary.missing.length, 6)
 })

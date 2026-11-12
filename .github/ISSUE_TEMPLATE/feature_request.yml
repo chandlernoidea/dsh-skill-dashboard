@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest something that would make many skills easier to manage
+labels: [needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and where does it get hard?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should the dashboard do? A rough sketch is enough.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What do you do today instead?
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Boundaries
+      description: This plugin is intentionally read-only over skill files. See ADR 0001.
+      options:
+        - label: This request does not require moving, rewriting, enabling or disabling skill directories.
+          required: true
+        - label: If this needs a model call, I understand it must be opt-in and show what will be sent.
+          required: true

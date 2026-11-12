@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Read the handoff first
+    url: https://github.com/chandlernoidea/dsh-skill-dashboard/blob/main/docs/HANDOFF.md
+    about: Architecture, data flow, known limits and the verification loop.

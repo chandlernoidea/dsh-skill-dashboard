@@ -9,6 +9,10 @@ const REQUIRED = [
   'lib/compose.js',
   'lib/capabilities.js',
   'lib/usage.js',
+  'lib/usage-cache.js',
+  'lib/skills-snapshot.js',
+  'lib/override.js',
+  'lib/translate.js',
   'taxonomy.json',
   'cordis.patch.yml',
   'locale/en.json',
@@ -18,7 +22,7 @@ const REQUIRED = [
   'LICENSE',
 ]
 
-const FORBIDDEN = [/^test\//, /^tools\//, /^docs\//, /^\.github\//, /^\.scratch\//, /^\.shots\//]
+const FORBIDDEN = [/^test\//, /^tools\//, /^docs\//, /^\.github\//, /^\.scratch\//, /^\.shots\//, /^src\//, /^scripts\//]
 
 const result = spawnSync('npm pack --dry-run --json', {
   encoding: 'utf8',
