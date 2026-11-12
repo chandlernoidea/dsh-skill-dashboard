@@ -10,6 +10,7 @@ window.__ModuleLoader__.load({
     const ZH_ROUTE = '/api/skill-dash/zh'
     const DIAG_ROUTE = '/api/skill-dash/diagnose'
     const USAGE_ROUTE = '/api/skill-dash/usage'
+    const CLASSIFY_ROUTE = '/api/skill-dash/classify'
     const FALLBACK_SITUATIONS = [{ id: 'other', title: '其他', order: 999 }]
 
     // ------------------------------------------------------------------ i18n
@@ -80,6 +81,9 @@ window.__ModuleLoader__.load({
           capabilitiesLabel: '宿主能力',
           capabilitiesAll: '齐全',
           taxonomyLabel: '归类表',
+          classify: '改归属',
+          closeClassify: '取消',
+          classifyFailed: '改归类失败：',
           partialScan: (done, total) => `只扫了 ${done}/${total} 个会话（超时）`,
           sessionLabel: '本会话',
           sessionUsage: (skills, calls) => `用过 ${skills} 个技能 · ${calls} 次调用`,
@@ -158,6 +162,9 @@ window.__ModuleLoader__.load({
           capabilitiesLabel: 'Capabilities',
           capabilitiesAll: 'all present',
           taxonomyLabel: 'Taxonomy',
+          classify: 'Reclassify',
+          closeClassify: 'Cancel',
+          classifyFailed: 'Reclassify failed: ',
           partialScan: (done, total) => `scanned ${done}/${total} sessions (timed out)`,
           sessionLabel: 'This session',
           sessionUsage: (skills, calls) => `${skills} skills · ${calls} calls`,
@@ -477,6 +484,19 @@ window.__ModuleLoader__.load({
   border-radius: 8px; padding: 6px 9px;
   color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1.5;
 }
+.sd-card-foot { display: flex; justify-content: flex-end; margin-top: 1px; }
+.sd-classify-toggle {
+  border: 0; background: transparent; color: var(--dsw-alias-label-secondary);
+  font: inherit; font-size: 9.5px; cursor: pointer; padding: 0 2px; line-height: 1.7;
+}
+.sd-classify-toggle:hover { color: var(--dsw-alias-brand-primary); }
+.sd-classify { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 3px; }
+.sd-classify .sd-chip { font-size: 10px; padding: 0 7px; line-height: 1.7; }
+.sd-classify .sd-chip.is-current {
+  border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent);
+}
+.sd-classify-error { color: var(--dsw-alias-state-error-primary); font-size: 9.5px; }
 .sd-origin {
   display: flex; align-items: center; gap: 6px;
   border-top: 1px dashed var(--dsw-alias-border-l1);
@@ -559,6 +579,9 @@ window.__ModuleLoader__.load({
       const [reportCopied, setReportCopied] = React.useState(false)
       const [view, setView] = React.useState('skills')
       const [showUnused, setShowUnused] = React.useState(false)
+      const [classifying, setClassifying] = React.useState('')
+      const [classifyBusy, setClassifyBusy] = React.useState(false)
+      const [classifyError, setClassifyError] = React.useState('')
       const [tick, setTick] = React.useState(0)
       const [zh, setZh] = React.useState({})
 
@@ -678,6 +701,29 @@ window.__ModuleLoader__.load({
       const copy = async (skill) => {
         await copyText(triggerFor(skill, language))
         flash(skill.name, 'copied')
+      }
+
+      const classify = async (skill, situationId) => {
+        if (classifyBusy) return
+        setClassifyBusy(true)
+        setClassifyError('')
+        try {
+          const response = await fetch(CLASSIFY_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: skill.name, situation: situationId }),
+          })
+          const payload = await response.json()
+          if (payload && payload.ok) {
+            setClassifying('')
+            setTick((value) => value + 1)
+          } else {
+            setClassifyError(String((payload && payload.error) || 'failed'))
+          }
+        } catch (error) {
+          setClassifyError(String((error && error.message) || error))
+        }
+        setClassifyBusy(false)
       }
 
       const copyOrigin = async (skill) => {
@@ -860,6 +906,20 @@ window.__ModuleLoader__.load({
             }, usageLoading ? T.scanning : usageScope === 'all' ? T.scopeSession : T.scopeAll),
           ),
 
+          topSkills.length > 0
+            ? h('div', { className: 'sd-bars' },
+                topSkills.map(([name, count]) =>
+                  h('div', { className: 'sd-bar-row', key: name },
+                    h('span', { className: 'sd-bar-name', title: name }, name),
+                    h('span', { className: 'sd-bar-track' },
+                      h('span', { className: 'sd-bar-fill', style: { width: Math.max(6, Math.round((count / topMax) * 100)) + '%' } }),
+                    ),
+                    h('span', { className: 'sd-bar-count' }, String(count)),
+                  ),
+                ),
+              )
+            : null,
+
           calledSkills.length > 0
             ? h('div', { className: 'sd-table' },
                 calledSkills.map((entry) =>
@@ -938,7 +998,6 @@ window.__ModuleLoader__.load({
             h('div', { className: 'sd-badges' },
               manual ? h('span', { className: 'sd-badge is-manual' }, T.badgeManual) : h('span', { className: 'sd-badge' }, T.badgeAuto),
               skill.situationSource === 'heuristic' ? h('span', { className: 'sd-badge' }, T.auto) : null,
-              usageBySkill[skill.name] > 0 ? h('span', { className: 'sd-badge is-used' }, '×' + usageBySkill[skill.name]) : null,
             ),
           ),
           description ? h('p', { className: 'sd-desc', title: translated ? skill.description : undefined }, description) : null,
@@ -971,6 +1030,27 @@ window.__ModuleLoader__.load({
                   originBusy ? T.copied : '⧉')
               : null,
           ),
+          h('div', { className: 'sd-card-foot' },
+            h('button', {
+              type: 'button',
+              className: 'sd-classify-toggle',
+              onClick: () => setClassifying((current) => (current === skill.name ? '' : skill.name)),
+            }, classifying === skill.name ? T.closeClassify : T.classify),
+          ),
+          classifying === skill.name
+            ? h('div', { className: 'sd-classify' },
+                data.situations.map((situation) =>
+                  h('button', {
+                    key: situation.id,
+                    type: 'button',
+                    className: 'sd-chip' + (skill.situation === situation.id ? ' is-current' : ''),
+                    disabled: classifyBusy,
+                    onClick: () => classify(skill, situation.id),
+                  }, situation.title),
+                ),
+                classifyError ? h('div', { className: 'sd-classify-error' }, T.classifyFailed + classifyError) : null,
+              )
+            : null,
         )
       }
 
@@ -997,101 +1077,6 @@ window.__ModuleLoader__.load({
           h('div', { className: 'sd-title' }, T.title),
           h('div', { className: 'sd-sub' }, T.subtitle(counts.total, counts.manual)),
           switchNode,
-        ),
-
-        h('div', { className: 'sd-status' },
-          h('div', { className: 'sd-status-row' },
-            h('button', {
-              type: 'button',
-              className: 'sd-btn-sm',
-              disabled: diag.status === 'loading',
-              onClick: runDiagnose,
-            }, diag.status === 'loading' ? T.diagnosing : diag.data ? T.rediagnose : T.diagnose),
-            diag.data
-              ? h('button', { type: 'button', className: 'sd-btn-sm', onClick: copyReport }, reportCopied ? T.copied : T.copyReport)
-              : null,
-            diag.status === 'error' ? h('span', { className: 'sd-status-err' }, diag.error) : null,
-          ),
-
-          pluginHealth
-            ? h('div', { className: 'sd-health' },
-                h('span', { className: 'sd-pill' },
-                  T.plugins, ' ', h('b', null, String(pluginHealth.total)), ' · ',
-                  h('b', null, String(pluginHealth.active)), ' ', T.pluginActive,
-                  pluginHealth.failed > 0
-                    ? h('span', { className: 'sd-pill-bad' }, ' · ', String(pluginHealth.failed), ' ', T.pluginFailed)
-                    : null,
-                  pluginHealth.disabled > 0
-                    ? h('span', { className: 'sd-pill-muted' }, ' · ', String(pluginHealth.disabled), ' ', T.pluginDisabled)
-                    : null,
-                ),
-              )
-            : null,
-
-          pluginHealth && pluginHealth.failed > 0
-            ? h('div', { className: 'sd-diag' },
-                h('button', {
-                  type: 'button',
-                  className: 'sd-diag-head',
-                  'aria-expanded': diagOpen ? 'true' : 'false',
-                  onClick: () => setDiagOpen((value) => !value),
-                },
-                  h('span', { className: 'sd-diag-warn' }, '⚠ ', T.failedList, ' ', String(pluginHealth.failed)),
-                  h('span', { className: 'sd-diag-toggle' }, diagOpen ? T.diagCollapse : T.diagExpand),
-                ),
-                diagOpen
-                  ? h('div', { className: 'sd-diag-body' },
-                      pluginHealth.failedNames.map((plugin) =>
-                        h('div', { className: 'sd-diag-item', key: plugin.moduleName || plugin.name },
-                          h('div', { className: 'sd-diag-name' },
-                            plugin.name,
-                            plugin.phase ? h('span', { className: 'sd-diag-phase' }, plugin.phase) : null,
-                          ),
-                          plugin.moduleName && plugin.moduleName !== plugin.name
-                            ? h('div', { className: 'sd-diag-module' }, plugin.moduleName)
-                            : null,
-                          h('div', { className: 'sd-diag-text' }, plugin.diagnostic || T.diagEmpty),
-                        ),
-                      ),
-                      pluginHealth.failed > pluginHealth.failedNames.length
-                        ? h('div', { className: 'sd-diag-more' }, T.diagMore(pluginHealth.failed - pluginHealth.failedNames.length))
-                        : null,
-                    )
-                  : null,
-              )
-            : null,
-
-          h('div', { className: 'sd-status-row' },
-            h('span', { className: 'sd-pill' },
-              usageScope === 'all' ? T.allSessions : T.sessionLabel, ' ', usageText),
-            h('button', {
-              type: 'button',
-              className: 'sd-btn-sm',
-              disabled: usageLoading,
-              onClick: toggleScope,
-            }, usageLoading ? T.scanning : usageScope === 'all' ? T.scopeSession : T.scopeAll),
-          ),
-
-          topSkills.length > 0
-            ? h('div', { className: 'sd-bars' },
-                topSkills.map(([name, count]) =>
-                  h('div', { className: 'sd-bar-row', key: name },
-                    h('span', { className: 'sd-bar-name', title: name }, name),
-                    h('span', { className: 'sd-bar-track' },
-                      h('span', { className: 'sd-bar-fill', style: { width: Math.max(6, Math.round((count / topMax) * 100)) + '%' } }),
-                    ),
-                    h('span', { className: 'sd-bar-count' }, String(count)),
-                  ),
-                ),
-              )
-            : null,
-
-          h('div', { className: 'sd-status-note' },
-            (usageScope === 'all' ? T.unusedAll : T.unusedSession) + ' ' + String(unusedCount),
-            usageScope === 'all' && usageAll && usageAll.partial
-              ? ' · ' + T.partialScan(usageAll.sessions, usageAll.available)
-              : null,
-          ),
         ),
 
         h('div', { className: 'sd-sticky' },

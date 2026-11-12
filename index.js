@@ -13,9 +13,9 @@
  * set the model sees, without activating a cold Agent.
  */
 
-import { readFile, stat } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { composeDashboard } from './lib/compose.js'
 import { summarizeAvailability } from './lib/capabilities.js'
 import { tallySkillUsage } from './lib/usage.js'
@@ -28,6 +28,7 @@ const ROUTE_PATH = '/api/skill-dash/data'
 const ZH_PATH = '/api/skill-dash/zh'
 const DIAG_PATH = '/api/skill-dash/diagnose'
 const USAGE_PATH = '/api/skill-dash/usage'
+const CLASSIFY_PATH = '/api/skill-dash/classify'
 const TAXONOMY_URL = new URL('./taxonomy.json', import.meta.url)
 
 const FALLBACK_TAXONOMY = {
@@ -70,7 +71,7 @@ function json(body, status = 200) {
  * instead of silently wondering why their edit did nothing.
  */
 async function loadOverride() {
-  const file = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skill-dashboard', 'taxonomy.json')
+  const file = overrideFile()
   try {
     const raw = await readFile(file, 'utf8')
     return { data: JSON.parse(raw), file, note: '' }
@@ -78,6 +79,38 @@ async function loadOverride() {
     if (error && error.code === 'ENOENT') return { data: null, file, note: '' }
     return { data: null, file, note: `覆盖表读取失败，已忽略：${error?.message ?? error}` }
   }
+}
+
+function overrideFile() {
+  return join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skill-dashboard', 'taxonomy.json')
+}
+
+/**
+ * Record one skill's situation in the user's override table. Read-modify-write
+ * through a temp file so a crash cannot leave half a table behind; everything
+ * the user already wrote keeps its place.
+ */
+async function writeOverride(name, situation) {
+  const file = overrideFile()
+  await mkdir(dirname(file), { recursive: true })
+
+  let data = {}
+  try {
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) data = parsed
+  } catch (error) {
+    data = {}
+  }
+
+  const skills = data.skills !== null && typeof data.skills === 'object' && !Array.isArray(data.skills) ? data.skills : {}
+  const previous = skills[name] !== null && typeof skills[name] === 'object' && !Array.isArray(skills[name]) ? skills[name] : {}
+  skills[name] = { ...previous, situation }
+  data.skills = skills
+
+  const temporary = `${file}.tmp`
+  await writeFile(temporary, JSON.stringify(data, null, 2) + '\n', 'utf8')
+  await rename(temporary, file)
+  return file
 }
 
 function fromEntry(entry) {
@@ -538,6 +571,60 @@ export function apply(ctx) {
       kind: 'exact',
       path: USAGE_PATH,
       resource: async (request) => handleUsage(request),
+    }),
+  )
+
+  // A resource route answers GET/HEAD only, so the write uses a Node handler
+  // and reads its own body.
+  const handleClassify = async (req, res) => {
+    const reply = (status, body) => {
+      res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(body))
+    }
+
+    if (req.method !== 'POST') {
+      res.writeHead(405, { allow: 'POST' })
+      res.end()
+      return
+    }
+
+    let body
+    try {
+      const chunks = []
+      for await (const chunk of req) chunks.push(chunk)
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    } catch (error) {
+      reply(400, { ok: false, error: 'invalid JSON body' })
+      return
+    }
+
+    const name = typeof body?.name === 'string' ? body.name.trim() : ''
+    const situation = typeof body?.situation === 'string' ? body.situation.trim() : ''
+    if (name === '') {
+      reply(400, { ok: false, error: 'name is required' })
+      return
+    }
+
+    const taxonomy = await loadTaxonomy()
+    const situations = Array.isArray(taxonomy.situations) ? taxonomy.situations : []
+    if (!situations.some((entry) => entry.id === situation)) {
+      reply(400, { ok: false, error: `unknown situation: ${situation}` })
+      return
+    }
+
+    try {
+      const file = await writeOverride(name, situation)
+      reply(200, { ok: true, name, situation, file })
+    } catch (error) {
+      reply(500, { ok: false, error: String(error?.message ?? error) })
+    }
+  }
+
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: CLASSIFY_PATH,
+      handler: handleClassify,
     }),
   )
 }
