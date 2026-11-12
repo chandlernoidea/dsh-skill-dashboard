@@ -29,6 +29,7 @@ const ZH_PATH = '/api/skill-dash/zh'
 const DIAG_PATH = '/api/skill-dash/diagnose'
 const USAGE_PATH = '/api/skill-dash/usage'
 const CLASSIFY_PATH = '/api/skill-dash/classify'
+const EXCLUDE_PATH = '/api/skill-dash/exclude'
 const TAXONOMY_URL = new URL('./taxonomy.json', import.meta.url)
 
 const FALLBACK_TAXONOMY = {
@@ -85,6 +86,58 @@ function overrideFile() {
   return join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skill-dashboard', 'taxonomy.json')
 }
 
+/** Names the user asked to keep out of the usage numbers. */
+function excludeOf(override) {
+  const list = override !== null && typeof override === 'object' && Array.isArray(override.data?.exclude) ? override.data.exclude : []
+  return new Set(list.filter((name) => typeof name === 'string' && name !== ''))
+}
+
+function omitExcluded(map, excluded) {
+  if (excluded.size === 0) return map ?? {}
+  const out = {}
+  for (const [key, value] of Object.entries(map ?? {})) if (!excluded.has(key)) out[key] = value
+  return out
+}
+
+function countExcluding(byName, excluded) {
+  let total = 0
+  for (const [key, value] of Object.entries(byName ?? {})) if (!excluded.has(key)) total += value
+  return total
+}
+
+/**
+ * Wrap a bytes-in/JSON-out writer. Every mutating route is POST + JSON body,
+ * and one place reading the body keeps the handlers about their own job.
+ */
+function postJson(handler) {
+  return async (req, res) => {
+    const reply = (status, body) => {
+      res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(body))
+    }
+    if (req.method !== 'POST') {
+      res.writeHead(405, { allow: 'POST' })
+      res.end()
+      return
+    }
+    let body
+    try {
+      const chunks = []
+      for await (const chunk of req) chunks.push(chunk)
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    } catch (error) {
+      reply(400, { ok: false, error: 'invalid JSON body' })
+      return
+    }
+    try {
+      const result = await handler(body)
+      reply(result.status ?? 200, result.body)
+    } catch (error) {
+      reply(500, { ok: false, error: String(error?.message ?? error) })
+    }
+  }
+}
+
 /**
  * Record one skill's situation in the user's override table. Read-modify-write
  * through a temp file so a crash cannot leave half a table behind; everything
@@ -106,6 +159,30 @@ async function writeOverride(name, situation) {
   const previous = skills[name] !== null && typeof skills[name] === 'object' && !Array.isArray(skills[name]) ? skills[name] : {}
   skills[name] = { ...previous, situation }
   data.skills = skills
+
+  const temporary = `${file}.tmp`
+  await writeFile(temporary, JSON.stringify(data, null, 2) + '\n', 'utf8')
+  await rename(temporary, file)
+  return file
+}
+
+/** Add or remove one skill from the exclude list, keeping everything else. */
+async function writeExclude(name, excluded) {
+  const file = overrideFile()
+  await mkdir(dirname(file), { recursive: true })
+
+  let data = {}
+  try {
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) data = parsed
+  } catch (error) {
+    data = {}
+  }
+
+  const current = Array.isArray(data.exclude) ? data.exclude.filter((entry) => typeof entry === 'string') : []
+  const next = excluded ? [...new Set([...current, name])] : current.filter((entry) => entry !== name)
+  if (next.length === 0) delete data.exclude
+  else data.exclude = next
 
   const temporary = `${file}.tmp`
   await writeFile(temporary, JSON.stringify(data, null, 2) + '\n', 'utf8')
@@ -166,6 +243,13 @@ async function readPlugins(ctx) {
       active: rows.filter((row) => row.fiberPhase === 'active').length,
       failed: failed.length,
       disabled: rows.filter((row) => row.enabled === false).length,
+      disabledNames: rows
+        .filter((row) => row.enabled === false)
+        .slice(0, 50)
+        .map((row) => ({
+          name: titleOf(row.meta) || row.moduleName || String(row.entryId),
+          moduleName: row.moduleName || '',
+        })),
       failedNames: failed.slice(0, 20).map((row) => ({
         name: titleOf(row.meta) || row.moduleName || String(row.entryId),
         moduleName: row.moduleName || '',
@@ -184,7 +268,7 @@ async function readPlugins(ctx) {
  * holds in memory. No log scan, no persistence read: `ownEvents()` is the
  * live event list this process is already keeping.
  */
-function readUsage(ctx, sessionId) {
+function readUsage(ctx, sessionId, excluded = new Set()) {
   try {
     if (!sessionId) return null
     const sessions = ctx.get('sessions')
@@ -194,8 +278,15 @@ function readUsage(ctx, sessionId) {
     // history is inherited, so count the whole log instead.
     const events =
       typeof session.snapshotEvents === 'function' ? session.snapshotEvents() : typeof session.ownEvents === 'function' ? session.ownEvents() : []
-    const { total, byName, lastByName } = tallySkillUsage(events)
-    return { sessionId, total, byName, lastByName }
+    const tally = tallySkillUsage(events)
+    return {
+      sessionId,
+      total: countExcluding(tally.byName, excluded),
+      byName: omitExcluded(tally.byName, excluded),
+      lastByName: omitExcluded(tally.lastByName, excluded),
+      namedByName: omitExcluded(tally.namedByName, excluded),
+      excluded: [...excluded],
+    }
   } catch (error) {
     console.warn('skill-dashboard: usage unavailable', error)
     return null
@@ -330,7 +421,7 @@ export function apply(ctx) {
     const taxonomy = await loadTaxonomy()
     const override = await loadOverride()
     const sessionId = url.searchParams.get('session') || currentSessionId()
-    const usage = readUsage(ctx, sessionId)
+    const usage = readUsage(ctx, sessionId, excludeOf(override))
 
     if (result.items === null) {
       // Not an HTTP error: the page is reachable, it just has nothing to show.
@@ -505,7 +596,7 @@ export function apply(ctx) {
     }),
   )
 
-  const readUsageAll = async (signal) => {
+  const readUsageAll = async (signal, excluded = new Set()) => {
     const query = ctx.get('sessionQuery')
     if (query === undefined || typeof query.listSessions !== 'function') {
       return { scope: 'all', error: 'sessionQuery unavailable', sessions: 0, available: 0, total: 0, byName: {}, partial: false }
@@ -515,6 +606,7 @@ export function apply(ctx) {
     const list = Array.isArray(records) ? records.slice(0, 30) : []
     const byName = {}
     const lastByName = {}
+    const namedByName = {}
     let total = 0
     let scanned = 0
     const deadline = Date.now() + 8000
@@ -538,13 +630,26 @@ export function apply(ctx) {
         for (const [name, time] of Object.entries(tally.lastByName ?? {})) {
           if (time > (lastByName[name] ?? 0)) lastByName[name] = time
         }
+        for (const [name, count] of Object.entries(tally.namedByName ?? {})) {
+          namedByName[name] = (namedByName[name] ?? 0) + count
+        }
         scanned += 1
       } catch (error) {
         // One unreadable session must not abort the scan.
       }
     }
 
-    return { scope: 'all', sessions: scanned, available: list.length, total, byName, lastByName, partial: scanned < list.length }
+    return {
+      scope: 'all',
+      sessions: scanned,
+      available: list.length,
+      total: countExcluding(byName, excluded),
+      byName: omitExcluded(byName, excluded),
+      lastByName: omitExcluded(lastByName, excluded),
+      namedByName: omitExcluded(namedByName, excluded),
+      excluded: [...excluded],
+      partial: scanned < list.length,
+    }
   }
 
   const handleUsage = async (request) => {
@@ -552,14 +657,15 @@ export function apply(ctx) {
     const signal = request?.signal
     const scope = url.searchParams.get('scope') || 'session'
     const sessionId = url.searchParams.get('session') || currentSessionId()
+    const override = await loadOverride()
 
     if (scope !== 'all') {
-      const usage = readUsage(ctx, sessionId)
+      const usage = readUsage(ctx, sessionId, excludeOf(override))
       return json({ ok: usage !== null, ...(usage ?? {}) })
     }
 
     try {
-      const aggregated = await readUsageAll(signal)
+      const aggregated = await readUsageAll(signal, excludeOf(override))
       return json({ ok: true, ...aggregated })
     } catch (error) {
       return json({ ok: false, error: String(error?.message ?? error) }, 500)
@@ -576,55 +682,41 @@ export function apply(ctx) {
 
   // A resource route answers GET/HEAD only, so the write uses a Node handler
   // and reads its own body.
-  const handleClassify = async (req, res) => {
-    const reply = (status, body) => {
-      res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-      res.end(JSON.stringify(body))
-    }
-
-    if (req.method !== 'POST') {
-      res.writeHead(405, { allow: 'POST' })
-      res.end()
-      return
-    }
-
-    let body
-    try {
-      const chunks = []
-      for await (const chunk of req) chunks.push(chunk)
-      body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-    } catch (error) {
-      reply(400, { ok: false, error: 'invalid JSON body' })
-      return
-    }
-
+  const handleClassify = postJson(async (body) => {
     const name = typeof body?.name === 'string' ? body.name.trim() : ''
     const situation = typeof body?.situation === 'string' ? body.situation.trim() : ''
-    if (name === '') {
-      reply(400, { ok: false, error: 'name is required' })
-      return
-    }
+    if (name === '') return { status: 400, body: { ok: false, error: 'name is required' } }
 
     const taxonomy = await loadTaxonomy()
     const situations = Array.isArray(taxonomy.situations) ? taxonomy.situations : []
     if (!situations.some((entry) => entry.id === situation)) {
-      reply(400, { ok: false, error: `unknown situation: ${situation}` })
-      return
+      return { status: 400, body: { ok: false, error: `unknown situation: ${situation}` } }
     }
 
-    try {
-      const file = await writeOverride(name, situation)
-      reply(200, { ok: true, name, situation, file })
-    } catch (error) {
-      reply(500, { ok: false, error: String(error?.message ?? error) })
-    }
-  }
+    const file = await writeOverride(name, situation)
+    return { body: { ok: true, name, situation, file } }
+  })
 
   ctx.effect(() =>
     server.register({
       kind: 'exact',
       path: CLASSIFY_PATH,
       handler: handleClassify,
+    }),
+  )
+
+  const handleExclude = postJson(async (body) => {
+    const name = typeof body?.name === 'string' ? body.name.trim() : ''
+    if (name === '') return { status: 400, body: { ok: false, error: 'name is required' } }
+    const file = await writeExclude(name, body?.excluded === true)
+    return { body: { ok: true, name, excluded: body?.excluded === true, file } }
+  })
+
+  ctx.effect(() =>
+    server.register({
+      kind: 'exact',
+      path: EXCLUDE_PATH,
+      handler: handleExclude,
     }),
   )
 }

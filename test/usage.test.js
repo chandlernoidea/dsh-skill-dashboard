@@ -45,6 +45,18 @@ test('a failure recorded as message.isError also counts as failed', () => {
   assert.equal(usage.failed, 1)
 })
 
+test('a call is "named" when the turn\'s user message mentions the skill', () => {
+  const usage = tallySkillUsage([
+    { type: 'user/message', data: { message: { content: [{ text: '用 tdd 把这块补上' }] } } },
+    call('skill', JSON.stringify({ name: 'tdd' }), 'c1'),
+    { type: 'user/message', data: { message: { content: [{ text: '把这个重构一下' }] } } },
+    call('skill', JSON.stringify({ name: 'code-review' }), 'c2'),
+  ])
+  assert.equal(usage.total, 2)
+  assert.deepEqual(usage.byName, { tdd: 1, 'code-review': 1 })
+  assert.deepEqual(usage.namedByName, { tdd: 1 })
+})
+
 test('ignores other tools and other events', () => {
   const usage = tallySkillUsage([
     call('ops_bash', JSON.stringify({ command: 'ls' })),
@@ -67,6 +79,6 @@ test('skips malformed arguments instead of counting an empty skill', () => {
 })
 
 test('tolerates a missing or malformed event list', () => {
-  assert.deepEqual(tallySkillUsage(undefined), { total: 0, byName: {}, failed: 0, lastByName: {} })
-  assert.deepEqual(tallySkillUsage([null, 42, 'x']), { total: 0, byName: {}, failed: 0, lastByName: {} })
+  assert.deepEqual(tallySkillUsage(undefined), { total: 0, byName: {}, failed: 0, lastByName: {}, namedByName: {} })
+  assert.deepEqual(tallySkillUsage([null, 42, 'x']), { total: 0, byName: {}, failed: 0, lastByName: {}, namedByName: {} })
 })

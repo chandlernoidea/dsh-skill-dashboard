@@ -11,6 +11,7 @@ window.__ModuleLoader__.load({
     const DIAG_ROUTE = '/api/skill-dash/diagnose'
     const USAGE_ROUTE = '/api/skill-dash/usage'
     const CLASSIFY_ROUTE = '/api/skill-dash/classify'
+    const EXCLUDE_ROUTE = '/api/skill-dash/exclude'
     const FALLBACK_SITUATIONS = [{ id: 'other', title: '其他', order: 999 }]
 
     // ------------------------------------------------------------------ i18n
@@ -84,6 +85,13 @@ window.__ModuleLoader__.load({
           classify: '改归属',
           closeClassify: '取消',
           classifyFailed: '改归类失败：',
+          disabledList: '停用',
+          excludeSkill: '不计入统计',
+          includeSkill: '恢复统计',
+          namedCol: '点名',
+          namedHint: '「点名」= 这次调用前，最近一条用户消息里出现了技能名（推断，非记录）',
+          excludedLine: (n) => `已排除统计 ${n} 个，点名字恢复：`,
+          excludedFailed: '改排除失败：',
           partialScan: (done, total) => `只扫了 ${done}/${total} 个会话（超时）`,
           sessionLabel: '本会话',
           sessionUsage: (skills, calls) => `用过 ${skills} 个技能 · ${calls} 次调用`,
@@ -165,6 +173,13 @@ window.__ModuleLoader__.load({
           classify: 'Reclassify',
           closeClassify: 'Cancel',
           classifyFailed: 'Reclassify failed: ',
+          disabledList: 'Disabled',
+          excludeSkill: 'Skip in stats',
+          includeSkill: 'Count again',
+          namedCol: 'Named',
+          namedHint: '"Named" means the turn\'s user message mentioned the skill before the call — a heuristic, not a recorded fact.',
+          excludedLine: (n) => `${n} excluded from stats — click a name to restore: `,
+          excludedFailed: 'Exclude failed: ',
           partialScan: (done, total) => `scanned ${done}/${total} sessions (timed out)`,
           sessionLabel: 'This session',
           sessionUsage: (skills, calls) => `${skills} skills · ${calls} calls`,
@@ -271,7 +286,7 @@ window.__ModuleLoader__.load({
 .sd-diag-head.is-static { cursor: default; }
 .sd-table { display: flex; flex-direction: column; gap: 2px; }
 .sd-trow {
-  display: grid; grid-template-columns: minmax(0, 1fr) 34px 64px;
+  display: grid; grid-template-columns: minmax(0, 1fr) 26px 26px 52px 16px;
   align-items: center; gap: 6px; padding: 2px 0;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
 }
@@ -281,6 +296,13 @@ window.__ModuleLoader__.load({
 }
 .sd-tcount { font-size: 10.5px; text-align: right; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary); }
 .sd-tlast { font-size: 9.5px; text-align: right; color: var(--dsw-alias-label-secondary); white-space: nowrap; }
+.sd-tnamed { font-size: 10px; text-align: right; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-secondary); }
+.sd-tx {
+  border: 0; background: transparent; color: var(--dsw-alias-label-secondary);
+  font: inherit; font-size: 10px; line-height: 1; padding: 0; cursor: pointer; opacity: .45;
+}
+.sd-tx:hover { opacity: 1; color: var(--dsw-alias-state-error-primary); }
+.sd-chip { border: 1px solid var(--dsw-alias-border-l2); background: transparent; color: var(--dsw-alias-label-secondary); border-radius: 999px; padding: 0 7px; font: inherit; font-size: 10px; line-height: 1.7; cursor: pointer; margin: 0 3px 3px 0; }
 .sd-unused { display: flex; flex-direction: column; gap: 7px; }
 .sd-unused-title { display: flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-secondary); font-size: 10px; }
 .sd-unused-names { color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
@@ -582,6 +604,7 @@ window.__ModuleLoader__.load({
       const [classifying, setClassifying] = React.useState('')
       const [classifyBusy, setClassifyBusy] = React.useState(false)
       const [classifyError, setClassifyError] = React.useState('')
+      const [excludeError, setExcludeError] = React.useState('')
       const [tick, setTick] = React.useState(0)
       const [zh, setZh] = React.useState({})
 
@@ -703,6 +726,26 @@ window.__ModuleLoader__.load({
         flash(skill.name, 'copied')
       }
 
+      const toggleExclude = async (name, excluded) => {
+        setExcludeError('')
+        try {
+          const response = await fetch(EXCLUDE_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name, excluded }),
+          })
+          const payload = await response.json()
+          if (payload && payload.ok) {
+            setUsageAll(null)
+            setTick((value) => value + 1)
+          } else {
+            setExcludeError(String((payload && payload.error) || 'failed'))
+          }
+        } catch (error) {
+          setExcludeError(String((error && error.message) || error))
+        }
+      }
+
       const classify = async (skill, situationId) => {
         if (classifyBusy) return
         setClassifyBusy(true)
@@ -814,6 +857,7 @@ window.__ModuleLoader__.load({
           name,
           count,
           last: (activeUsage && activeUsage.lastByName && activeUsage.lastByName[name]) || 0,
+          named: (activeUsage && activeUsage.namedByName && activeUsage.namedByName[name]) || 0,
         }))
 
       const unusedSkills = skills.filter((skill) => !usageBySkill[skill.name])
@@ -858,6 +902,12 @@ window.__ModuleLoader__.load({
                     ? h('span', { className: 'sd-pill-muted' }, ' · ', String(health.disabled), ' ', T.pluginDisabled)
                     : null,
                 ),
+              )
+            : null,
+
+          health && Array.isArray(health.disabledNames) && health.disabledNames.length > 0
+            ? h('div', { className: 'sd-diag-meta' },
+                T.disabledList + '：' + health.disabledNames.map((row) => row.name).join('、'),
               )
             : null,
 
@@ -925,8 +975,15 @@ window.__ModuleLoader__.load({
                 calledSkills.map((entry) =>
                   h('div', { className: 'sd-trow', key: entry.name },
                     h('span', { className: 'sd-tname', title: entry.name }, entry.name),
-                    h('span', { className: 'sd-tcount' }, String(entry.count)),
+                    h('span', { className: 'sd-tcount', title: T.namedHint }, String(entry.count)),
+                    h('span', { className: 'sd-tnamed', title: T.namedHint }, entry.named > 0 ? String(entry.named) : '·'),
                     h('span', { className: 'sd-tlast' }, ago(entry.last)),
+                    h('button', {
+                      type: 'button',
+                      className: 'sd-tx',
+                      title: T.excludeSkill,
+                      onClick: () => toggleExclude(entry.name, true),
+                    }, '⊘'),
                   ),
                 ),
               )
@@ -937,6 +994,21 @@ window.__ModuleLoader__.load({
             className: 'sd-btn-sm',
             onClick: () => setShowUnused((value) => !value),
           }, (showUnused ? T.hideUnused : T.showUnused) + ' · ' + String(unusedSkills.length)),
+
+          excludeError ? h('div', { className: 'sd-classify-error' }, T.excludedFailed + excludeError) : null,
+          (activeUsage && Array.isArray(activeUsage.excluded) ? activeUsage.excluded : []).length > 0
+            ? h('div', { className: 'sd-status-note' },
+                T.excludedLine(activeUsage.excluded.length),
+                activeUsage.excluded.map((name) =>
+                  h('button', {
+                    key: name,
+                    type: 'button',
+                    className: 'sd-chip',
+                    onClick: () => toggleExclude(name, false),
+                  }, name),
+                ),
+              )
+            : null,
 
           showUnused
             ? h('div', { className: 'sd-unused' },
