@@ -21,6 +21,7 @@ test('counts successful skill calls by name', () => {
   assert.equal(usage.total, 3)
   assert.deepEqual(usage.byName, { tdd: 2, pr: 1 })
   assert.equal(usage.failed, 0)
+  assert.deepEqual(usage.lastByName, {})
 })
 
 test('a failed call counts as failed, not as usage', () => {
@@ -66,6 +67,6 @@ test('skips malformed arguments instead of counting an empty skill', () => {
 })
 
 test('tolerates a missing or malformed event list', () => {
-  assert.deepEqual(tallySkillUsage(undefined), { total: 0, byName: {}, failed: 0 })
-  assert.deepEqual(tallySkillUsage([null, 42, 'x']), { total: 0, byName: {}, failed: 0 })
+  assert.deepEqual(tallySkillUsage(undefined), { total: 0, byName: {}, failed: 0, lastByName: {} })
+  assert.deepEqual(tallySkillUsage([null, 42, 'x']), { total: 0, byName: {}, failed: 0, lastByName: {} })
 })

@@ -161,8 +161,8 @@ function readUsage(ctx, sessionId) {
     // history is inherited, so count the whole log instead.
     const events =
       typeof session.snapshotEvents === 'function' ? session.snapshotEvents() : typeof session.ownEvents === 'function' ? session.ownEvents() : []
-    const { total, byName } = tallySkillUsage(events)
-    return { sessionId, total, byName }
+    const { total, byName, lastByName } = tallySkillUsage(events)
+    return { sessionId, total, byName, lastByName }
   } catch (error) {
     console.warn('skill-dashboard: usage unavailable', error)
     return null
@@ -481,6 +481,7 @@ export function apply(ctx) {
     const records = await query.listSessions(signal)
     const list = Array.isArray(records) ? records.slice(0, 30) : []
     const byName = {}
+    const lastByName = {}
     let total = 0
     let scanned = 0
     const deadline = Date.now() + 8000
@@ -501,13 +502,16 @@ export function apply(ctx) {
         const tally = tallySkillUsage(events)
         total += tally.total
         for (const [name, count] of Object.entries(tally.byName)) byName[name] = (byName[name] ?? 0) + count
+        for (const [name, time] of Object.entries(tally.lastByName ?? {})) {
+          if (time > (lastByName[name] ?? 0)) lastByName[name] = time
+        }
         scanned += 1
       } catch (error) {
         // One unreadable session must not abort the scan.
       }
     }
 
-    return { scope: 'all', sessions: scanned, available: list.length, total, byName, partial: scanned < list.length }
+    return { scope: 'all', sessions: scanned, available: list.length, total, byName, lastByName, partial: scanned < list.length }
   }
 
   const handleUsage = async (request) => {

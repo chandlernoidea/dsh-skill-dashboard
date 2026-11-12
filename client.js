@@ -68,6 +68,18 @@ window.__ModuleLoader__.load({
           unusedSession: '本会话未调用',
           unusedAll: '历史未调用',
           allSessions: '全部会话',
+          viewSkills: '技能',
+          viewDiagnose: '诊断',
+          usageTitle: '调用情况',
+          showUnused: '展开未调用',
+          hideUnused: '收起未调用',
+          justNow: '刚刚',
+          minutesAgo: (n) => `${n} 分钟前`,
+          hoursAgo: (n) => `${n} 小时前`,
+          daysAgo: (n) => `${n} 天前`,
+          capabilitiesLabel: '宿主能力',
+          capabilitiesAll: '齐全',
+          taxonomyLabel: '归类表',
           partialScan: (done, total) => `只扫了 ${done}/${total} 个会话（超时）`,
           sessionLabel: '本会话',
           sessionUsage: (skills, calls) => `用过 ${skills} 个技能 · ${calls} 次调用`,
@@ -134,6 +146,18 @@ window.__ModuleLoader__.load({
           unusedSession: 'unused in this session',
           unusedAll: 'never called',
           allSessions: 'All sessions',
+          viewSkills: 'Skills',
+          viewDiagnose: 'Diagnostics',
+          usageTitle: 'Calls',
+          showUnused: 'Show uncalled',
+          hideUnused: 'Hide uncalled',
+          justNow: 'just now',
+          minutesAgo: (n) => `${n}m ago`,
+          hoursAgo: (n) => `${n}h ago`,
+          daysAgo: (n) => `${n}d ago`,
+          capabilitiesLabel: 'Capabilities',
+          capabilitiesAll: 'all present',
+          taxonomyLabel: 'Taxonomy',
           partialScan: (done, total) => `scanned ${done}/${total} sessions (timed out)`,
           sessionLabel: 'This session',
           sessionUsage: (skills, calls) => `${skills} skills · ${calls} calls`,
@@ -224,6 +248,35 @@ window.__ModuleLoader__.load({
 .sd-stat-value { font-size: 17px; font-weight: 680; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .sd-stat.is-manual { border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 42%, var(--dsw-alias-border-l2)); }
 .sd-stat.is-manual .sd-stat-value { color: var(--dsw-alias-state-warn-primary); }
+.sd-switch { display: flex; gap: 4px; margin-top: 9px; }
+.sd-switch-btn {
+  border: 1px solid var(--dsw-alias-border-l2); background: transparent;
+  color: var(--dsw-alias-label-secondary); border-radius: 7px;
+  padding: 1px 10px; font: inherit; font-size: 11px; line-height: 1.8; cursor: pointer;
+}
+.sd-switch-btn.is-on {
+  border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent);
+}
+.sd-page { display: flex; flex-direction: column; gap: 8px; padding-bottom: 20px; }
+.sd-section-title { color: var(--dsw-alias-label-secondary); font-size: 10px; letter-spacing: .09em; text-transform: uppercase; margin-top: 6px; }
+.sd-diag-meta { color: var(--dsw-alias-label-secondary); font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.sd-diag-head.is-static { cursor: default; }
+.sd-table { display: flex; flex-direction: column; gap: 2px; }
+.sd-trow {
+  display: grid; grid-template-columns: minmax(0, 1fr) 34px 64px;
+  align-items: center; gap: 6px; padding: 2px 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+.sd-tname {
+  font-family: var(--ds-font-family-code, ui-monospace, monospace);
+  font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sd-tcount { font-size: 10.5px; text-align: right; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary); }
+.sd-tlast { font-size: 9.5px; text-align: right; color: var(--dsw-alias-label-secondary); white-space: nowrap; }
+.sd-unused { display: flex; flex-direction: column; gap: 7px; }
+.sd-unused-title { display: flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-secondary); font-size: 10px; }
+.sd-unused-names { color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
 .sd-status { display: flex; flex-direction: column; gap: 7px; margin-top: 9px; }
 .sd-status-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .sd-btn-sm {
@@ -504,6 +557,8 @@ window.__ModuleLoader__.load({
       const [usageAll, setUsageAll] = React.useState(null)
       const [usageLoading, setUsageLoading] = React.useState(false)
       const [reportCopied, setReportCopied] = React.useState(false)
+      const [view, setView] = React.useState('skills')
+      const [showUnused, setShowUnused] = React.useState(false)
       const [tick, setTick] = React.useState(0)
       const [zh, setZh] = React.useState({})
 
@@ -696,6 +751,149 @@ window.__ModuleLoader__.load({
         .map((capability) => (isZh ? capability.label : capability.labelEn))
         .join(' / ')
 
+      const ago = (ts) => {
+        if (!ts) return ''
+        const diff = Date.now() - ts
+        if (diff < 60000) return T.justNow
+        const minutes = Math.floor(diff / 60000)
+        if (minutes < 60) return T.minutesAgo(minutes)
+        const hours = Math.floor(minutes / 60)
+        if (hours < 24) return T.hoursAgo(hours)
+        return T.daysAgo(Math.floor(hours / 24))
+      }
+
+      const calledSkills = Object.entries(usageBySkill)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => ({
+          name,
+          count,
+          last: (activeUsage && activeUsage.lastByName && activeUsage.lastByName[name]) || 0,
+        }))
+
+      const unusedSkills = skills.filter((skill) => !usageBySkill[skill.name])
+      const situationTitle = {}
+      for (const situation of data.situations) situationTitle[situation.id] = situation.title
+      const unusedGroups = []
+      for (const skill of unusedSkills) {
+        const key = skill.situation || 'other'
+        let group = unusedGroups.find((entry) => entry.id === key)
+        if (group === undefined) {
+          group = { id: key, title: situationTitle[key] || key, names: [] }
+          unusedGroups.push(group)
+        }
+        group.names.push(skill.name)
+      }
+
+      const renderDiagnose = () => {
+        const health = pluginHealth
+        return h('div', { className: 'sd-page' },
+          h('div', { className: 'sd-status-row' },
+            h('button', {
+              type: 'button',
+              className: 'sd-btn-sm',
+              disabled: diag.status === 'loading',
+              onClick: runDiagnose,
+            }, diag.status === 'loading' ? T.diagnosing : diag.data ? T.rediagnose : T.diagnose),
+            diag.data
+              ? h('button', { type: 'button', className: 'sd-btn-sm', onClick: copyReport }, reportCopied ? T.copied : T.copyReport)
+              : null,
+            diag.status === 'error' ? h('span', { className: 'sd-status-err' }, diag.error) : null,
+          ),
+
+          health
+            ? h('div', { className: 'sd-health' },
+                h('span', { className: 'sd-pill' },
+                  T.plugins, ' ', h('b', null, String(health.total)), ' · ',
+                  h('b', null, String(health.active)), ' ', T.pluginActive,
+                  health.failed > 0
+                    ? h('span', { className: 'sd-pill-bad' }, ' · ', String(health.failed), ' ', T.pluginFailed)
+                    : null,
+                  health.disabled > 0
+                    ? h('span', { className: 'sd-pill-muted' }, ' · ', String(health.disabled), ' ', T.pluginDisabled)
+                    : null,
+                ),
+              )
+            : null,
+
+          health && health.failed > 0
+            ? h('div', { className: 'sd-diag' },
+                h('div', { className: 'sd-diag-head is-static' },
+                  h('span', { className: 'sd-diag-warn' }, '⚠ ', T.failedList, ' ', String(health.failed)),
+                ),
+                h('div', { className: 'sd-diag-body' },
+                  health.failedNames.map((plugin) =>
+                    h('div', { className: 'sd-diag-item', key: plugin.moduleName || plugin.name },
+                      h('div', { className: 'sd-diag-name' },
+                        plugin.name,
+                        plugin.phase ? h('span', { className: 'sd-diag-phase' }, plugin.phase) : null,
+                      ),
+                      plugin.moduleName ? h('div', { className: 'sd-diag-module' }, plugin.moduleName) : null,
+                      h('div', { className: 'sd-diag-text' }, plugin.diagnostic || T.diagEmpty),
+                    ),
+                  ),
+                ),
+              )
+            : null,
+
+          diag.data && diag.data.capabilities
+            ? h('div', { className: 'sd-diag-meta' },
+                T.capabilitiesLabel + '：' + (diag.data.capabilities.missing.length === 0
+                  ? T.capabilitiesAll
+                  : diag.data.capabilities.missing.map((cap) => (isZh ? cap.label : cap.labelEn)).join('、')),
+              )
+            : null,
+
+          diag.data && diag.data.taxonomy
+            ? h('div', { className: 'sd-diag-meta' },
+                T.taxonomyLabel + '：v' + String(diag.data.taxonomy.version) + ' · ' + String(diag.data.taxonomy.situations) + ' · ' + String(diag.data.taxonomy.skills),
+              )
+            : null,
+
+          h('div', { className: 'sd-section-title' }, T.usageTitle),
+          h('div', { className: 'sd-status-row' },
+            h('span', { className: 'sd-pill' }, usageScope === 'all' ? T.allSessions : T.sessionLabel, ' ', usageText),
+            h('button', {
+              type: 'button',
+              className: 'sd-btn-sm',
+              disabled: usageLoading,
+              onClick: toggleScope,
+            }, usageLoading ? T.scanning : usageScope === 'all' ? T.scopeSession : T.scopeAll),
+          ),
+
+          calledSkills.length > 0
+            ? h('div', { className: 'sd-table' },
+                calledSkills.map((entry) =>
+                  h('div', { className: 'sd-trow', key: entry.name },
+                    h('span', { className: 'sd-tname', title: entry.name }, entry.name),
+                    h('span', { className: 'sd-tcount' }, String(entry.count)),
+                    h('span', { className: 'sd-tlast' }, ago(entry.last)),
+                  ),
+                ),
+              )
+            : h('div', { className: 'sd-status-note' }, T.sessionEmpty),
+
+          h('button', {
+            type: 'button',
+            className: 'sd-btn-sm',
+            onClick: () => setShowUnused((value) => !value),
+          }, (showUnused ? T.hideUnused : T.showUnused) + ' · ' + String(unusedSkills.length)),
+
+          showUnused
+            ? h('div', { className: 'sd-unused' },
+                unusedGroups.map((group) =>
+                  h('div', { className: 'sd-unused-group', key: group.id },
+                    h('div', { className: 'sd-unused-title' },
+                      group.title,
+                      h('span', { className: 'sd-group-count' }, String(group.names.length)),
+                    ),
+                    h('div', { className: 'sd-unused-names' }, group.names.join('、')),
+                  ),
+                ),
+              )
+            : null,
+        )
+      }
+
       const needle = query.trim().toLowerCase()
       const visible = skills.filter((skill) => {
         if (needle) {
@@ -776,11 +974,29 @@ window.__ModuleLoader__.load({
         )
       }
 
+      const switchNode = h('div', { className: 'sd-switch' },
+        h('button', { type: 'button', className: 'sd-switch-btn' + (view === 'skills' ? ' is-on' : ''), onClick: () => setView('skills') }, T.viewSkills),
+        h('button', { type: 'button', className: 'sd-switch-btn' + (view === 'diagnose' ? ' is-on' : ''), onClick: () => setView('diagnose') }, T.viewDiagnose),
+      )
+
+      if (view === 'diagnose') {
+        return h('div', { className: 'sd-root' },
+          h('div', { className: 'sd-head' },
+            h('div', { className: 'sd-eyebrow' }, T.eyebrow),
+            h('div', { className: 'sd-title' }, T.title),
+            h('div', { className: 'sd-sub' }, T.subtitle(counts.total, counts.manual)),
+            switchNode,
+          ),
+          renderDiagnose(),
+        )
+      }
+
       return h('div', { className: 'sd-root' },
         h('div', { className: 'sd-head' },
           h('div', { className: 'sd-eyebrow' }, T.eyebrow),
           h('div', { className: 'sd-title' }, T.title),
           h('div', { className: 'sd-sub' }, T.subtitle(counts.total, counts.manual)),
+          switchNode,
         ),
 
         h('div', { className: 'sd-status' },
