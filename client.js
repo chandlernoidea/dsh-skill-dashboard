@@ -732,7 +732,7 @@ window.__ModuleLoader__.load({
           ),
           classifying === skill.name
             ? h('div', { className: 'sd-classify' },
-                data.situations.map((situation) =>
+                situations.map((situation) =>
                   h('button', {
                     key: situation.id,
                     type: 'button',
@@ -2688,6 +2688,7 @@ window.__ModuleLoader__.load({
           firstSentence,
           triggerFor,
           originFor,
+          renderSkillCard,
           appendText,
           deriveUsageView,
           classifyUsage,
