@@ -81,6 +81,7 @@
           firstSentence,
           triggerFor,
           originFor,
+          renderSkillCard,
           appendText,
           deriveUsageView,
           classifyUsage,

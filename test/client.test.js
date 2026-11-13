@@ -263,6 +263,40 @@ test('the Client renders the skills view with cards and usage bars', () => {
   assert.match(rendered, /清理已移除的覆盖项/)
 })
 
+test('the classify row renders its chips from the card view', () => {
+  // 改归属 used to read `data.situations` — a binding that only exists inside
+  // Dashboard — so the first click threw a ReferenceError and took the panel
+  // (and every later visit to the tab) down with it.
+  const { client } = loadClient()
+  const { renderSkillCard } = client.__internals
+  const skill = readyPayload().skills[0]
+  const view = {
+    T: new Proxy({}, { get: (_, key) => String(key) }),
+    isZh: false,
+    zh: {},
+    language: 'zh-CN',
+    batchMode: false,
+    picked: [],
+    feedback: { name: '', kind: '' },
+    classifying: skill.name,
+    classifyBusy: false,
+    classifyError: '',
+    situations: readyPayload().situations,
+    vagueSet: new Set(),
+    newNames: new Set(),
+    togglePick() {},
+    copy() {},
+    retranslate() {},
+    copyOrigin() {},
+    classify() {},
+    setClassifying() {},
+  }
+
+  const rendered = JSON.stringify(renderSkillCard(view, skill))
+  assert.match(rendered, /写代码/)
+  assert.match(rendered, /其他/)
+})
+
 test('the Client shows a starter guide before the first skill call', () => {
   const { dashboard } = loadClient({ starter: true })
   const rendered = JSON.stringify(dashboard({ sessionId: 'session-test' }))
